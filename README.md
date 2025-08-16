@@ -37,9 +37,9 @@ Raspberry Pi Pico (RP2040)
 │ GP0  ┊ ┊ ┊ ┊ ┊ ┊ ┊ ┊ VBUS │
 │ GP1  ┊ ┊ ┊ ┊ ┊ ┊ ┊ ┊ VSYS │
 │ GND  ┊ ┊ ┊ ┊ ┊ ┊ ┊ ┊ GND  │
-│ GP2  ●─────────────────────→ │ TIP (Switch 1)
-│ GP3  ●─────────────────────→ │ RING (Switch 2)  
-│ GP4  ┊ ┊ ┊ ┊ ┊ ┊ ┊ ┊ 3V3  │
+│ GP2  ┊ ┊ ┊ ┊ ┊ ┊ ┊ ┊ ┊    │
+│ GP3  ●─────────────────────→ │ TIP (Switch 1)
+│ GP4  ●─────────────────────→ │ RING (Switch 2)  
 │ GP5  ┊ ┊ ┊ ┊ ┊ ┊ ┊ ┊ 3V3E │
 │ GND  ●─────────────────────→ │ SLEEVE (GND)
 │ :    ┊ ┊ ┊ ┊ ┊ ┊ ┊ ┊ :    │
@@ -50,9 +50,9 @@ Raspberry Pi Pico (RP2040)
 
 ```
 TRSジャック（3.5mm ステレオ）
-    ┌─ TIP ────→ GP2 (Switch 1)
+    ┌─ TIP ────→ GP3 (Switch 1)
     │
-    ├─ RING ───→ GP3 (Switch 2)
+    ├─ RING ───→ GP4 (Switch 2)
     │
     └─ SLEEVE ─→ GND
 ```
@@ -60,7 +60,7 @@ TRSジャック（3.5mm ステレオ）
 ### 回路図
 
 ```
-GP2  ●─────●─── TIP (Switch 1)
+GP3  ●─────●─── TIP (Switch 1)
      │       │   
     [内部]   │   ※内部プルアップ有効
    プルアップ │
@@ -71,7 +71,7 @@ GP2  ●─────●─── TIP (Switch 1)
              │
             GND
 
-GP3  ●─────●─── RING (Switch 2)
+GP4  ●─────●─── RING (Switch 2)
      │       │
     [内部]   │   ※内部プルアップ有効 
    プルアップ │
