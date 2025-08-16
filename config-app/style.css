@@ -442,3 +442,40 @@ footer p {
     visibility: visible;
     opacity: 1;
 }
+
+/* Modified field styles */
+.modified {
+    border-color: var(--accent-warning) !important;
+    background-color: rgba(255, 152, 0, 0.1) !important;
+    box-shadow: 0 0 0 2px rgba(255, 152, 0, 0.2);
+    transition: all 0.2s ease;
+}
+
+/* Change indicator */
+.change-indicator {
+    color: var(--accent-warning);
+    font-weight: bold;
+    font-size: 1.2em;
+    margin-left: var(--spacing-xs);
+    display: none; /* Initially hidden */
+    animation: pulse-indicator 2s infinite;
+}
+
+@keyframes pulse-indicator {
+    0%, 100% { 
+        opacity: 1; 
+        transform: scale(1);
+    }
+    50% { 
+        opacity: 0.7; 
+        transform: scale(1.1);
+    }
+}
+
+/* Modified button state */
+.btn-primary:disabled {
+    background-color: #666 !important;
+    cursor: not-allowed !important;
+    transform: none !important;
+    opacity: 0.6;
+}

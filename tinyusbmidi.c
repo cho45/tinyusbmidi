@@ -345,8 +345,7 @@ void process_sysex_data(const uint8_t* data, uint16_t length) {
     
     if (target_config) {
         *target_config = temp_config;
-        // Temporarily disable flash save to avoid USB interruption
-        // save_config_to_flash();
+        save_config_to_flash();
     }
 }
 
@@ -425,14 +424,14 @@ int main(void) {
         
         // MIDI processing is now handled in tud_midi_rx_cb()
         
-        // Simple heartbeat debug
-        static uint32_t last_heartbeat = 0;
-        uint32_t now = board_millis();
-        if (now - last_heartbeat > 2000) {
-            printf("Heartbeat: %d ms, MIDI mounted: %d\n", 
-                   now, tud_midi_mounted());
-            last_heartbeat = now;
-        }
+        // Heartbeat debug disabled
+        // static uint32_t last_heartbeat = 0;
+        // uint32_t now = board_millis();
+        // if (now - last_heartbeat > 2000) {
+        //     printf("Heartbeat: %d ms, MIDI mounted: %d\n", 
+        //            now, tud_midi_mounted());
+        //     last_heartbeat = now;
+        // }
         
         board_led_write(tud_mounted());
     }

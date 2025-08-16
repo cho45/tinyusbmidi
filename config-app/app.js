@@ -9,6 +9,16 @@ class Application {
         this.currentConfig = this.getDefaultConfig();
         this.isConnected = false;
         
+        // Configuration change tracking
+        this.originalConfig = null; // 初期設定値を保存
+        this.isModified = false; // 変更フラグ
+        
+        // LocalStorage keys
+        this.STORAGE_KEYS = {
+            LAST_DEVICE: 'midi-config-last-device',
+            ORIGINAL_CONFIG: 'midi-config-original'
+        };
+        
         // Initialize on DOM ready
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => this.initialize());
@@ -41,6 +51,9 @@ class Application {
         if (initialized) {
             this.log('WebMIDI initialized successfully', 'success');
             this.refreshDeviceList();
+            
+            // 自動再接続を試行
+            await this.tryAutoReconnect();
         } else {
             this.log('Failed to initialize WebMIDI', 'error');
         }
@@ -71,6 +84,14 @@ class Application {
         this.connectionStatus = document.getElementById('connectionStatus');
         this.webmidiStatus = document.getElementById('webmidiStatus');
         
+        // Change indicators
+        this.changeIndicators = {
+            'sw1-press': document.getElementById('sw1-press-indicator'),
+            'sw1-release': document.getElementById('sw1-release-indicator'),
+            'sw2-press': document.getElementById('sw2-press-indicator'),
+            'sw2-release': document.getElementById('sw2-release-indicator')
+        };
+
         // Configuration form elements
         this.configElements = {
             'sw1-press': {
@@ -140,7 +161,16 @@ class Application {
             const element = this.configElements[key];
             element.type.addEventListener('change', () => {
                 this.updateMessageTypeLabel(key);
+                this.checkConfigModified(); // 変更検知
             });
+            
+            // 全ての設定フィールドに変更検知イベントリスナーを追加
+            element.channel.addEventListener('change', () => this.checkConfigModified());
+            element.channel.addEventListener('input', () => this.checkConfigModified());
+            element.param1.addEventListener('change', () => this.checkConfigModified());
+            element.param1.addEventListener('input', () => this.checkConfigModified());
+            element.param2.addEventListener('change', () => this.checkConfigModified());
+            element.param2.addEventListener('input', () => this.checkConfigModified());
         });
     }
 
@@ -148,11 +178,22 @@ class Application {
      * Setup MIDI event handlers
      */
     setupMidiEventHandlers() {
-        this.midiManager.addEventListener('connected', (event) => {
+        this.midiManager.addEventListener('connected', async (event) => {
             this.isConnected = true;
             this.updateConnectionStatus(true, event.detail.device);
             this.log(`Connected to: ${event.detail.device}`, 'success');
             this.enableConfigControls();
+            
+            // 接続後に自動的に設定を読み込む
+            try {
+                this.log('デバイスから設定を自動読み込み中...', 'info');
+                await this.handleReadConfig();
+                
+                // 読み込み完了後、現在の設定を初期設定として保存
+                this.saveCurrentConfigAsOriginal();
+            } catch (error) {
+                this.log(`自動設定読み込みに失敗: ${error.message}`, 'warning');
+            }
         });
 
         this.midiManager.addEventListener('disconnected', () => {
@@ -190,10 +231,52 @@ class Application {
     }
 
     /**
+     * 自動再接続を試行
+     */
+    async tryAutoReconnect() {
+        try {
+            const lastDevice = this.getLastConnectedDevice();
+            if (!lastDevice) {
+                this.log('前回接続デバイスなし', 'info');
+                return;
+            }
+
+            this.log(`自動再接続を試行: ${lastDevice.name}`, 'info');
+            
+            // デバイスリストから対象デバイスを検索
+            const devices = this.midiManager.getAvailableDevices();
+            const targetDevice = devices.find(device => 
+                device.id === lastDevice.id || device.name === lastDevice.name
+            );
+
+            if (!targetDevice) {
+                this.log(`前回接続デバイスが見つかりません: ${lastDevice.name}`, 'warning');
+                return;
+            }
+
+            // デバイス選択を更新
+            this.deviceSelect.value = targetDevice.id;
+            
+            // 接続を試行
+            const connected = await this.midiManager.connectDevice(targetDevice.id);
+            if (connected) {
+                this.log(`自動再接続成功: ${targetDevice.name}`, 'success');
+                this.connectBtn.textContent = 'Disconnect';
+            } else {
+                this.log(`自動再接続失敗: ${targetDevice.name}`, 'warning');
+            }
+        } catch (error) {
+            this.log(`自動再接続エラー: ${error.message}`, 'error');
+        }
+    }
+
+    /**
      * Handle connect button click
      */
     async handleConnect() {
         if (this.isConnected) {
+            // 明示的切断時は自動再接続情報を削除
+            this.removeLastConnectedDevice();
             this.midiManager.disconnect();
         } else {
             const selectedDevice = this.deviceSelect.value;
@@ -205,6 +288,13 @@ class Application {
             const connected = await this.midiManager.connectDevice(selectedDevice);
             if (connected) {
                 this.connectBtn.textContent = 'Disconnect';
+                
+                // 接続成功時にデバイス情報を保存
+                const devices = this.midiManager.getAvailableDevices();
+                const connectedDevice = devices.find(d => d.id === selectedDevice);
+                if (connectedDevice) {
+                    this.saveLastConnectedDevice(connectedDevice.id, connectedDevice.name);
+                }
             }
         }
     }
@@ -268,6 +358,9 @@ class Application {
             }
             
             this.log('Configuration written successfully', 'success');
+            
+            // 保存完了後、現在の設定を初期設定として保存
+            this.saveCurrentConfigAsOriginal();
         } catch (error) {
             this.log(`Failed to write configuration: ${error.message}`, 'error');
         }
@@ -295,6 +388,9 @@ class Application {
         
         this.updateMessageTypeLabels();
         this.log('Reset to default configuration', 'info');
+        
+        // リセット後、現在の設定を初期設定として保存
+        this.saveCurrentConfigAsOriginal();
     }
 
     /**
@@ -358,6 +454,9 @@ class Application {
 
                 this.updateMessageTypeLabels();
                 this.log('Configuration loaded from file', 'success');
+                
+                // ファイル読み込み後、現在の設定を初期設定として保存
+                this.saveCurrentConfigAsOriginal();
             } catch (error) {
                 this.log(`Failed to load configuration: ${error.message}`, 'error');
             }
@@ -580,6 +679,164 @@ class Application {
             'sw2-press': { msgType: 1, channel: 0, param1: 1, param2: 0 },
             'sw2-release': { msgType: 1, channel: 0, param1: 0, param2: 0 }
         };
+    }
+
+    /**
+     * LocalStorage management methods
+     */
+
+    /**
+     * 最後に接続したデバイス情報を保存
+     */
+    saveLastConnectedDevice(deviceId, deviceName) {
+        try {
+            const deviceInfo = {
+                id: deviceId,
+                name: deviceName,
+                timestamp: Date.now()
+            };
+            localStorage.setItem(this.STORAGE_KEYS.LAST_DEVICE, JSON.stringify(deviceInfo));
+            this.log(`デバイス情報を保存: ${deviceName}`, 'info');
+        } catch (error) {
+            this.log(`デバイス情報の保存に失敗: ${error.message}`, 'error');
+        }
+    }
+
+    /**
+     * 最後に接続したデバイス情報を取得
+     */
+    getLastConnectedDevice() {
+        try {
+            const stored = localStorage.getItem(this.STORAGE_KEYS.LAST_DEVICE);
+            if (stored) {
+                const deviceInfo = JSON.parse(stored);
+                // 24時間以内のデバイス情報のみ有効
+                if (Date.now() - deviceInfo.timestamp < 24 * 60 * 60 * 1000) {
+                    return deviceInfo;
+                }
+            }
+        } catch (error) {
+            this.log(`デバイス情報の取得に失敗: ${error.message}`, 'warning');
+        }
+        return null;
+    }
+
+    /**
+     * 最後に接続したデバイス情報を削除
+     */
+    removeLastConnectedDevice() {
+        try {
+            localStorage.removeItem(this.STORAGE_KEYS.LAST_DEVICE);
+            this.log('デバイス情報を削除', 'info');
+        } catch (error) {
+            this.log(`デバイス情報の削除に失敗: ${error.message}`, 'error');
+        }
+    }
+
+    /**
+     * 現在の設定を初期設定として保存
+     */
+    saveCurrentConfigAsOriginal() {
+        try {
+            const currentConfig = {};
+            Object.keys(this.configElements).forEach(key => {
+                currentConfig[key] = this.getConfigFromUI(key);
+            });
+            this.originalConfig = JSON.parse(JSON.stringify(currentConfig)); // Deep copy
+            this.isModified = false;
+            this.updateModificationState();
+            this.log('初期設定として保存', 'info');
+        } catch (error) {
+            this.log(`初期設定の保存に失敗: ${error.message}`, 'error');
+        }
+    }
+
+    /**
+     * 設定が変更されているかチェック
+     */
+    checkConfigModified() {
+        if (!this.originalConfig) {
+            return false;
+        }
+
+        try {
+            let modified = false;
+            Object.keys(this.configElements).forEach(key => {
+                const current = this.getConfigFromUI(key);
+                const original = this.originalConfig[key];
+                
+                if (!original || 
+                    current.msgType !== original.msgType ||
+                    current.channel !== original.channel ||
+                    current.param1 !== original.param1 ||
+                    current.param2 !== original.param2) {
+                    modified = true;
+                }
+            });
+            
+            if (this.isModified !== modified) {
+                this.isModified = modified;
+                this.updateModificationState();
+            }
+            
+            return modified;
+        } catch (error) {
+            this.log(`変更検知エラー: ${error.message}`, 'error');
+            return false;
+        }
+    }
+
+    /**
+     * 変更状態に応じてUIを更新
+     */
+    updateModificationState() {
+        // Write to Deviceボタンの有効/無効制御
+        if (this.writeConfigBtn) {
+            this.writeConfigBtn.disabled = !this.isConnected || !this.isModified;
+        }
+
+        // 変更されたフィールドにmodifiedクラスを追加/削除
+        Object.keys(this.configElements).forEach(key => {
+            this.updateFieldModificationState(key);
+        });
+    }
+
+    /**
+     * 特定のフィールドの変更状態を更新
+     */
+    updateFieldModificationState(key) {
+        if (!this.originalConfig) return;
+
+        const elements = this.configElements[key];
+        const indicator = this.changeIndicators[key];
+        const current = this.getConfigFromUI(key);
+        const original = this.originalConfig[key];
+        
+        const isFieldModified = !original || 
+            current.msgType !== original.msgType ||
+            current.channel !== original.channel ||
+            current.param1 !== original.param1 ||
+            current.param2 !== original.param2;
+
+        // 全ての入力要素にmodifiedクラスを適用
+        [elements.type, elements.channel, elements.param1, elements.param2].forEach(element => {
+            if (element) {
+                if (isFieldModified) {
+                    element.classList.add('modified');
+                } else {
+                    element.classList.remove('modified');
+                }
+            }
+        });
+
+        // 変更インジケーターの表示/非表示制御
+        if (indicator) {
+            if (isFieldModified) {
+                indicator.style.display = 'inline';
+            } else {
+                indicator.style.display = 'none';
+            }
+        }
     }
 }
 
