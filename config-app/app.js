@@ -107,6 +107,7 @@ createApp({
         // Disconnect
         removeLastConnectedDevice();
         midiManager.disconnect();
+        readConfiguration.value = null;
       } else {
         // Connect
         if (!selectedDeviceId.value) {
@@ -366,6 +367,7 @@ createApp({
 
       midiManager.addEventListener('disconnected', () => {
         isConnected.value = false;
+        readConfiguration.value = null;
         log('Device disconnected', 'warning');
       });
 

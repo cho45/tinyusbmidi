@@ -20,7 +20,6 @@ TinyUSB MIDI Footswitchは、Raspberry Pi Pico（RP2040）を使用して実装�
 ### 基本部品
 - **Raspberry Pi Pico** × 1
 - **3.5mm TRSジャック** × 1（ステレオジャック）
-- **外部プルアップ抵抗** × 2（不要、内部プルアップを使用）
 - **ケース**（3Dプリントまたは市販）
 
 ### フットスイッチ

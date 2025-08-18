@@ -79,6 +79,7 @@ h3 {
 .status-bar {
     display: flex;
     align-items: center;
+    gap: var(--spacing-md);
 }
 
 .status-indicator {
@@ -135,12 +136,28 @@ h3 {
     font-size: 1rem;
 }
 
-/* Configuration Grid */
-.config-grid {
+/* Switch Groups */
+.switch-group {
+    margin-bottom: var(--spacing-xl);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-lg);
+    background-color: var(--bg-secondary);
+}
+
+.switch-group-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: var(--spacing-md);
+    color: var(--accent-primary);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 2px solid var(--border-color);
+}
+
+.switch-config-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: 1fr 1fr;
     gap: var(--spacing-lg);
-    margin-bottom: var(--spacing-lg);
 }
 
 .config-item {
@@ -232,6 +249,15 @@ h3 {
 .btn-small {
     padding: var(--spacing-xs) var(--spacing-md);
     font-size: 0.85rem;
+}
+
+.btn-danger {
+    background-color: var(--accent-danger);
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #d32f2f;
 }
 
 /* Action Buttons */
@@ -377,7 +403,7 @@ footer p {
         width: 100%;
     }
     
-    .config-grid {
+    .switch-config-row {
         grid-template-columns: 1fr;
     }
     
