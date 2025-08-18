@@ -1,0 +1,25 @@
+{
+  "name": "tinyusbmidi-config-app",
+  "version": "2.0.0",
+  "description": "TinyUSB MIDI Footswitch Configuration Tool",
+  "type": "module",
+  "main": "app.js",
+  "scripts": {
+    "serve": "npx serve .",
+    "lint": "eslint *.js",
+    "lint:fix": "eslint *.js --fix"
+  },
+  "devDependencies": {
+    "eslint": "^9.33.0",
+    "globals": "^15.13.0"
+  },
+  "keywords": [
+    "midi",
+    "usb",
+    "footswitch",
+    "raspberry-pi-pico",
+    "webmidi"
+  ],
+  "author": "",
+  "license": "MIT"
+}

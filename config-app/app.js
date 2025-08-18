@@ -1,844 +1,439 @@
-/**
- * Main Application Controller
- * Manages UI interactions and coordinates with MidiManager
- */
+import { createApp, ref, reactive, computed, onMounted, nextTick } from 'vue';
+import MidiManager from './midi-manager.js';
 
-class Application {
-    constructor() {
-        this.midiManager = new MidiManager();
-        this.currentConfig = this.getDefaultConfig();
-        this.isConnected = false;
-        
-        // Configuration change tracking
-        this.originalConfig = null; // 初期設定値を保存
-        this.isModified = false; // 変更フラグ
-        
-        // LocalStorage keys
-        this.STORAGE_KEYS = {
-            LAST_DEVICE: 'midi-config-last-device',
-            ORIGINAL_CONFIG: 'midi-config-original'
-        };
-        
-        // Initialize on DOM ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.initialize());
-        } else {
-            this.initialize();
+createApp({
+  setup() {
+    // Reactive state
+    const isConnected = ref(false);
+    const selectedDeviceId = ref('');
+    const availableDevices = ref([]);
+    const webMidiStatus = ref('Checking...');
+    const logEntries = ref([]);
+    const fileInput = ref(null);
+    const logContent = ref(null);
+
+    // Configuration state
+    const configurations = reactive({
+      sw1Press: { msgType: 'CC', channel: 1, param1: 64, param2: 127 },
+      sw1Release: { msgType: 'CC', channel: 1, param1: 64, param2: 0 },
+      sw2Press: { msgType: 'PC', channel: 1, param1: 1, param2: 0 },
+      sw2Release: { msgType: 'PC', channel: 1, param1: 0, param2: 0 }
+    });
+
+    const readConfiguration = ref(null); // デバイスから読み込んだ設定
+
+    // MIDI Manager instance
+    const midiManager = new MidiManager();
+
+    // Computed properties
+    const connectionStatusText = computed(() => {
+      if (!isConnected.value) return 'Disconnected';
+      const device = availableDevices.value.find(d => d.id === selectedDeviceId.value);
+      return device ? `Connected: ${device.name}` : 'Connected';
+    });
+
+    // 設定比較の共通ロジック
+    const isConfigChanged = (current, saved) => {
+      if (!saved) return false; // まだ読み込んでいない場合は変更なし
+      return current.msgType !== saved.msgType ||
+             current.channel !== saved.channel ||
+             current.param1 !== saved.param1 ||
+             current.param2 !== saved.param2;
+    };
+
+    const hasChanges = computed(() => {
+      if (!readConfiguration.value) return false;
+      return Object.keys(configurations).some(key => 
+        isConfigChanged(configurations[key], readConfiguration.value[key])
+      );
+    });
+
+    // Helper functions
+    const log = (message, type = 'info') => {
+      const timestamp = new Date().toLocaleTimeString();
+      logEntries.value.push({
+        id: Date.now() + Math.random(),
+        timestamp,
+        message,
+        type
+      });
+      
+      // Limit log entries
+      if (logEntries.value.length > 100) {
+        logEntries.value.shift();
+      }
+      
+      // Auto scroll
+      nextTick(() => {
+        if (logContent.value) {
+          logContent.value.scrollTop = logContent.value.scrollHeight;
         }
-    }
+      });
+    };
 
-    /**
-     * Initialize the application
-     */
-    async initialize() {
-        this.bindElements();
-        this.attachEventListeners();
-        this.setupMidiEventHandlers();
-        this.updateMessageTypeLabels();
-        
-        // Check WebMIDI support
-        if (!navigator.requestMIDIAccess) {
-            this.updateWebMidiStatus('Not Supported');
-            this.log('WebMIDI API is not supported in this browser', 'error');
-            this.disableAllControls();
-            return;
+    const hasConfigChanged = (configKey) => {
+      if (!readConfiguration.value) return false;
+      return isConfigChanged(configurations[configKey], readConfiguration.value[configKey]);
+    };
+
+    const getParam1Label = (msgType) => {
+      switch (msgType) {
+      case 'CC': return 'CC Number';
+      case 'PC': return 'Program';
+      case 'Note': return 'Note';
+      default: return 'Parameter 1';
+      }
+    };
+
+    const getParam2Label = (msgType) => {
+      switch (msgType) {
+      case 'CC': return 'Value';
+      case 'Note': return 'Velocity';
+      default: return 'Parameter 2';
+      }
+    };
+
+    // Methods
+    const refreshDevices = async () => {
+      if (midiManager) {
+        midiManager.refreshDeviceList();
+      }
+    };
+
+    const handleConnect = async () => {
+      if (!midiManager) return;
+
+      if (isConnected.value) {
+        // Disconnect
+        removeLastConnectedDevice();
+        midiManager.disconnect();
+      } else {
+        // Connect
+        if (!selectedDeviceId.value) {
+          log('Please select a device', 'warning');
+          return;
         }
         
-        this.updateWebMidiStatus('Supported');
-        
-        // Initialize MIDI Manager
-        const initialized = await this.midiManager.initialize();
-        if (initialized) {
-            this.log('WebMIDI initialized successfully', 'success');
-            this.refreshDeviceList();
-            
-            // 自動再接続を試行
-            await this.tryAutoReconnect();
-        } else {
-            this.log('Failed to initialize WebMIDI', 'error');
-        }
-    }
-
-    /**
-     * Bind DOM elements
-     */
-    bindElements() {
-        // Device controls
-        this.deviceSelect = document.getElementById('deviceSelect');
-        this.connectBtn = document.getElementById('connectBtn');
-        this.refreshBtn = document.getElementById('refreshBtn');
-        
-        // Configuration controls
-        this.readConfigBtn = document.getElementById('readConfigBtn');
-        this.writeConfigBtn = document.getElementById('writeConfigBtn');
-        this.resetDefaultBtn = document.getElementById('resetDefaultBtn');
-        this.saveLocalBtn = document.getElementById('saveLocalBtn');
-        this.loadLocalBtn = document.getElementById('loadLocalBtn');
-        this.fileInput = document.getElementById('fileInput');
-        
-        // Log controls
-        this.clearLogBtn = document.getElementById('clearLogBtn');
-        this.logContent = document.getElementById('logContent');
-        
-        // Status elements
-        this.connectionStatus = document.getElementById('connectionStatus');
-        this.webmidiStatus = document.getElementById('webmidiStatus');
-        
-        // Change indicators
-        this.changeIndicators = {
-            'sw1-press': document.getElementById('sw1-press-indicator'),
-            'sw1-release': document.getElementById('sw1-release-indicator'),
-            'sw2-press': document.getElementById('sw2-press-indicator'),
-            'sw2-release': document.getElementById('sw2-release-indicator')
-        };
-
-        // Configuration form elements
-        this.configElements = {
-            'sw1-press': {
-                type: document.getElementById('sw1-press-type'),
-                channel: document.getElementById('sw1-press-channel'),
-                param1: document.getElementById('sw1-press-param1'),
-                param2: document.getElementById('sw1-press-param2'),
-                param1Label: document.getElementById('sw1-press-param1-label'),
-                param2Label: document.getElementById('sw1-press-param2-label'),
-                param1Row: document.getElementById('sw1-press-param1-row'),
-                param2Row: document.getElementById('sw1-press-param2-row')
-            },
-            'sw1-release': {
-                type: document.getElementById('sw1-release-type'),
-                channel: document.getElementById('sw1-release-channel'),
-                param1: document.getElementById('sw1-release-param1'),
-                param2: document.getElementById('sw1-release-param2'),
-                param1Label: document.getElementById('sw1-release-param1-label'),
-                param2Label: document.getElementById('sw1-release-param2-label'),
-                param1Row: document.getElementById('sw1-release-param1-row'),
-                param2Row: document.getElementById('sw1-release-param2-row')
-            },
-            'sw2-press': {
-                type: document.getElementById('sw2-press-type'),
-                channel: document.getElementById('sw2-press-channel'),
-                param1: document.getElementById('sw2-press-param1'),
-                param2: document.getElementById('sw2-press-param2'),
-                param1Label: document.getElementById('sw2-press-param1-label'),
-                param2Label: document.getElementById('sw2-press-param2-label'),
-                param1Row: document.getElementById('sw2-press-param1-row'),
-                param2Row: document.getElementById('sw2-press-param2-row')
-            },
-            'sw2-release': {
-                type: document.getElementById('sw2-release-type'),
-                channel: document.getElementById('sw2-release-channel'),
-                param1: document.getElementById('sw2-release-param1'),
-                param2: document.getElementById('sw2-release-param2'),
-                param1Label: document.getElementById('sw2-release-param1-label'),
-                param2Label: document.getElementById('sw2-release-param2-label'),
-                param1Row: document.getElementById('sw2-release-param1-row'),
-                param2Row: document.getElementById('sw2-release-param2-row')
-            }
-        };
-    }
-
-    /**
-     * Attach event listeners
-     */
-    attachEventListeners() {
-        // Device controls
-        this.connectBtn.addEventListener('click', () => this.handleConnect());
-        this.refreshBtn.addEventListener('click', () => this.refreshDeviceList());
-        
-        // Configuration controls
-        this.readConfigBtn.addEventListener('click', () => this.handleReadConfig());
-        this.writeConfigBtn.addEventListener('click', () => this.handleWriteConfig());
-        this.resetDefaultBtn.addEventListener('click', () => this.handleResetDefault());
-        this.saveLocalBtn.addEventListener('click', () => this.handleSaveLocal());
-        this.loadLocalBtn.addEventListener('click', () => this.handleLoadLocal());
-        this.fileInput.addEventListener('change', (e) => this.handleFileLoad(e));
-        
-        // Log controls
-        this.clearLogBtn.addEventListener('click', () => this.clearLog());
-        
-        // Message type change handlers
-        Object.keys(this.configElements).forEach(key => {
-            const element = this.configElements[key];
-            element.type.addEventListener('change', () => {
-                this.updateMessageTypeLabel(key);
-                this.checkConfigModified(); // 変更検知
-            });
-            
-            // 全ての設定フィールドに変更検知イベントリスナーを追加
-            element.channel.addEventListener('change', () => this.checkConfigModified());
-            element.channel.addEventListener('input', () => this.checkConfigModified());
-            element.param1.addEventListener('change', () => this.checkConfigModified());
-            element.param1.addEventListener('input', () => this.checkConfigModified());
-            element.param2.addEventListener('change', () => this.checkConfigModified());
-            element.param2.addEventListener('input', () => this.checkConfigModified());
-        });
-    }
-
-    /**
-     * Setup MIDI event handlers
-     */
-    setupMidiEventHandlers() {
-        this.midiManager.addEventListener('connected', async (event) => {
-            this.isConnected = true;
-            this.updateConnectionStatus(true, event.detail.device);
-            this.log(`Connected to: ${event.detail.device}`, 'success');
-            this.enableConfigControls();
-            
-            // 接続後に自動的に設定を読み込む
-            try {
-                this.log('デバイスから設定を自動読み込み中...', 'info');
-                await this.handleReadConfig();
-                
-                // 読み込み完了後、現在の設定を初期設定として保存
-                this.saveCurrentConfigAsOriginal();
-            } catch (error) {
-                this.log(`自動設定読み込みに失敗: ${error.message}`, 'warning');
-            }
-        });
-
-        this.midiManager.addEventListener('disconnected', () => {
-            this.isConnected = false;
-            this.updateConnectionStatus(false);
-            this.log('Device disconnected', 'warning');
-            this.disableConfigControls();
-        });
-
-        this.midiManager.addEventListener('error', (event) => {
-            this.log(event.detail.message, 'error');
-        });
-
-        this.midiManager.addEventListener('devicesChanged', (event) => {
-            this.updateDeviceList(event.detail.devices);
-        });
-
-        this.midiManager.addEventListener('sysexSent', (event) => {
-            const hexString = event.detail.data.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-            this.log(`SysEx Sent: ${hexString}`, 'sysex');
-        });
-
-        this.midiManager.addEventListener('midiMessage', (event) => {
-            const hexString = event.detail.data.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-            this.log(`MIDI Received: ${hexString}`, 'sysex');
-        });
-
-        this.midiManager.addEventListener('configReceived', (event) => {
-            this.log(`Config received: Switch ${event.detail.switchNum + 1} ${event.detail.eventType === 0 ? 'Press' : 'Release'}`, 'info');
-        });
-
-        this.midiManager.addEventListener('statechange', (event) => {
-            this.log(`Device ${event.detail.name} ${event.detail.state}`, 'info');
-        });
-    }
-
-    /**
-     * 自動再接続を試行
-     */
-    async tryAutoReconnect() {
-        try {
-            const lastDevice = this.getLastConnectedDevice();
-            if (!lastDevice) {
-                this.log('前回接続デバイスなし', 'info');
-                return;
-            }
-
-            this.log(`自動再接続を試行: ${lastDevice.name}`, 'info');
-            
-            // デバイスリストから対象デバイスを検索
-            const devices = this.midiManager.getAvailableDevices();
-            const targetDevice = devices.find(device => 
-                device.id === lastDevice.id || device.name === lastDevice.name
-            );
-
-            if (!targetDevice) {
-                this.log(`前回接続デバイスが見つかりません: ${lastDevice.name}`, 'warning');
-                return;
-            }
-
-            // デバイス選択を更新
-            this.deviceSelect.value = targetDevice.id;
-            
-            // 接続を試行
-            const connected = await this.midiManager.connectDevice(targetDevice.id);
-            if (connected) {
-                this.log(`自動再接続成功: ${targetDevice.name}`, 'success');
-                this.connectBtn.textContent = 'Disconnect';
-            } else {
-                this.log(`自動再接続失敗: ${targetDevice.name}`, 'warning');
-            }
-        } catch (error) {
-            this.log(`自動再接続エラー: ${error.message}`, 'error');
-        }
-    }
-
-    /**
-     * Handle connect button click
-     */
-    async handleConnect() {
-        if (this.isConnected) {
-            // 明示的切断時は自動再接続情報を削除
-            this.removeLastConnectedDevice();
-            this.midiManager.disconnect();
-        } else {
-            const selectedDevice = this.deviceSelect.value;
-            if (!selectedDevice) {
-                this.log('Please select a device', 'warning');
-                return;
-            }
-            
-            const connected = await this.midiManager.connectDevice(selectedDevice);
-            if (connected) {
-                this.connectBtn.textContent = 'Disconnect';
-                
-                // 接続成功時にデバイス情報を保存
-                const devices = this.midiManager.getAvailableDevices();
-                const connectedDevice = devices.find(d => d.id === selectedDevice);
-                if (connectedDevice) {
-                    this.saveLastConnectedDevice(connectedDevice.id, connectedDevice.name);
-                }
-            }
-        }
-    }
-
-    /**
-     * Handle read configuration
-     */
-    async handleReadConfig() {
-        if (!this.isConnected) {
-            this.log('No device connected', 'warning');
-            return;
-        }
-
-        try {
-            this.log('Reading configuration from device...', 'info');
-            const configs = await this.midiManager.requestConfiguration();
-            
-            // Parse and apply configurations
-            configs.forEach(config => {
-                const configKey = this.getConfigKey(config.switchNum, config.eventType);
-                if (configKey) {
-                    this.applyConfigToUI(configKey, config);
-                }
-            });
-            
-            this.log('Configuration read successfully', 'success');
-        } catch (error) {
-            this.log(`Failed to read configuration: ${error.message}`, 'error');
-        }
-    }
-
-    /**
-     * Handle write configuration
-     */
-    async handleWriteConfig() {
-        if (!this.isConnected) {
-            this.log('No device connected', 'warning');
-            return;
-        }
-
-        try {
-            this.log('Writing configuration to device...', 'info');
-            
-            // Write all 4 configurations
-            const configs = [
-                { key: 'sw1-press', switchNum: 0, eventType: 0 },
-                { key: 'sw1-release', switchNum: 0, eventType: 1 },
-                { key: 'sw2-press', switchNum: 1, eventType: 0 },
-                { key: 'sw2-release', switchNum: 1, eventType: 1 }
-            ];
-
-            for (const config of configs) {
-                const configData = this.getConfigFromUI(config.key);
-                await this.midiManager.sendConfiguration(
-                    config.switchNum,
-                    config.eventType,
-                    configData
-                );
-                // Small delay between messages
-                await new Promise(resolve => setTimeout(resolve, 50));
-            }
-            
-            this.log('Configuration written successfully', 'success');
-            
-            // 保存完了後、現在の設定を初期設定として保存
-            this.saveCurrentConfigAsOriginal();
-        } catch (error) {
-            this.log(`Failed to write configuration: ${error.message}`, 'error');
-        }
-    }
-
-    /**
-     * Handle reset to default
-     */
-    handleResetDefault() {
-        const defaultConfig = this.getDefaultConfig();
-        
-        // Apply default configuration to UI
-        this.applyConfigToUI('sw1-press', {
-            msgType: 0, channel: 0, param1: 64, param2: 127
-        });
-        this.applyConfigToUI('sw1-release', {
-            msgType: 0, channel: 0, param1: 64, param2: 0
-        });
-        this.applyConfigToUI('sw2-press', {
-            msgType: 1, channel: 0, param1: 1, param2: 0
-        });
-        this.applyConfigToUI('sw2-release', {
-            msgType: 1, channel: 0, param1: 0, param2: 0
-        });
-        
-        this.updateMessageTypeLabels();
-        this.log('Reset to default configuration', 'info');
-        
-        // リセット後、現在の設定を初期設定として保存
-        this.saveCurrentConfigAsOriginal();
-    }
-
-    /**
-     * Handle save to local file
-     */
-    handleSaveLocal() {
-        const config = {
-            version: '1.0.0',
-            timestamp: new Date().toISOString(),
-            configurations: {
-                'sw1-press': this.getConfigFromUI('sw1-press'),
-                'sw1-release': this.getConfigFromUI('sw1-release'),
-                'sw2-press': this.getConfigFromUI('sw2-press'),
-                'sw2-release': this.getConfigFromUI('sw2-release')
-            }
-        };
-
-        const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `midi-config-${new Date().toISOString().slice(0, 10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        
-        this.log('Configuration saved to file', 'success');
-    }
-
-    /**
-     * Handle load from local file
-     */
-    handleLoadLocal() {
-        this.fileInput.click();
-    }
-
-    /**
-     * Handle file load
-     */
-    handleFileLoad(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const config = JSON.parse(e.target.result);
-                
-                // Validate configuration
-                if (!config.configurations) {
-                    throw new Error('Invalid configuration file');
-                }
-
-                // Apply configurations to UI
-                Object.keys(config.configurations).forEach(key => {
-                    if (this.configElements[key]) {
-                        this.applyConfigToUI(key, config.configurations[key]);
-                    }
-                });
-
-                this.updateMessageTypeLabels();
-                this.log('Configuration loaded from file', 'success');
-                
-                // ファイル読み込み後、現在の設定を初期設定として保存
-                this.saveCurrentConfigAsOriginal();
-            } catch (error) {
-                this.log(`Failed to load configuration: ${error.message}`, 'error');
-            }
-        };
-        
-        reader.readAsText(file);
-        // Reset file input
-        event.target.value = '';
-    }
-
-    /**
-     * Get configuration from UI
-     */
-    getConfigFromUI(key) {
-        const elements = this.configElements[key];
-        return {
-            msgType: MidiManager.getMsgTypeValue(elements.type.value),
-            channel: parseInt(elements.channel.value) - 1, // Convert to 0-based
-            param1: parseInt(elements.param1.value),
-            param2: parseInt(elements.param2.value)
-        };
-    }
-
-    /**
-     * Apply configuration to UI
-     */
-    applyConfigToUI(key, config) {
-        const elements = this.configElements[key];
-        if (!elements) return;
-
-        elements.type.value = MidiManager.getMsgTypeString(config.msgType);
-        elements.channel.value = (config.channel + 1).toString(); // Convert to 1-based
-        elements.param1.value = config.param1.toString();
-        elements.param2.value = config.param2.toString();
-        
-        this.updateMessageTypeLabel(key);
-    }
-
-    /**
-     * Get config key from switch and event
-     */
-    getConfigKey(switchNum, eventType) {
-        const switchName = switchNum === 0 ? 'sw1' : 'sw2';
-        const eventName = eventType === 0 ? 'press' : 'release';
-        return `${switchName}-${eventName}`;
-    }
-
-    /**
-     * Update message type labels
-     */
-    updateMessageTypeLabels() {
-        Object.keys(this.configElements).forEach(key => {
-            this.updateMessageTypeLabel(key);
-        });
-    }
-
-    /**
-     * Update message type label for a specific config
-     */
-    updateMessageTypeLabel(key) {
-        const elements = this.configElements[key];
-        const msgType = elements.type.value;
-
-        switch (msgType) {
-            case 'None':
-                elements.param1Label.textContent = 'Parameter 1:';
-                elements.param2Label.textContent = 'Parameter 2:';
-                elements.param1Row.style.display = 'none';
-                elements.param2Row.style.display = 'none';
-                break;
-            case 'CC':
-                elements.param1Label.textContent = 'CC Number:';
-                elements.param2Label.textContent = 'Value:';
-                elements.param1Row.style.display = 'flex';
-                elements.param2Row.style.display = 'flex';
-                break;
-            case 'PC':
-                elements.param1Label.textContent = 'Program:';
-                elements.param1Row.style.display = 'flex';
-                elements.param2Row.style.display = 'none';
-                break;
-            case 'Note':
-                elements.param1Label.textContent = 'Note:';
-                elements.param2Label.textContent = 'Velocity:';
-                elements.param1Row.style.display = 'flex';
-                elements.param2Row.style.display = 'flex';
-                break;
-        }
-    }
-
-    /**
-     * Refresh device list
-     */
-    refreshDeviceList() {
-        const devices = this.midiManager.getAvailableDevices();
-        this.updateDeviceList(devices);
-    }
-
-    /**
-     * Update device list in UI
-     */
-    updateDeviceList(devices) {
-        // Clear current options
-        this.deviceSelect.innerHTML = '<option value="">Select a MIDI device...</option>';
-        
-        // Add device options
-        devices.forEach(device => {
-            const option = document.createElement('option');
-            option.value = device.id;
-            option.textContent = device.name;
-            if (device.manufacturer) {
-                option.textContent += ` (${device.manufacturer})`;
-            }
-            this.deviceSelect.appendChild(option);
-        });
-
-        // If no devices found
-        if (devices.length === 0) {
-            const option = document.createElement('option');
-            option.value = '';
-            option.textContent = 'No MIDI devices found';
-            option.disabled = true;
-            this.deviceSelect.appendChild(option);
-        }
-    }
-
-    /**
-     * Update connection status
-     */
-    updateConnectionStatus(connected, deviceName = '') {
-        const statusText = this.connectionStatus.querySelector('.status-text');
+        const connected = await midiManager.connectDevice(selectedDeviceId.value);
         if (connected) {
-            this.connectionStatus.classList.add('connected');
-            statusText.textContent = `Connected: ${deviceName}`;
-            this.connectBtn.textContent = 'Disconnect';
-        } else {
-            this.connectionStatus.classList.remove('connected');
-            statusText.textContent = 'Disconnected';
-            this.connectBtn.textContent = 'Connect';
+          const device = availableDevices.value.find(d => d.id === selectedDeviceId.value);
+          if (device) {
+            saveLastConnectedDevice(device.id, device.name);
+          }
         }
-    }
+      }
+    };
 
-    /**
-     * Update WebMIDI status
-     */
-    updateWebMidiStatus(status) {
-        this.webmidiStatus.textContent = status;
-    }
 
-    /**
-     * Enable configuration controls
-     */
-    enableConfigControls() {
-        this.readConfigBtn.disabled = false;
-        this.writeConfigBtn.disabled = false;
-    }
+    const writeToDevice = async () => {
+      if (!isConnected.value || !midiManager) {
+        log('No device connected', 'warning');
+        return;
+      }
 
-    /**
-     * Disable configuration controls
-     */
-    disableConfigControls() {
-        this.readConfigBtn.disabled = true;
-        this.writeConfigBtn.disabled = true;
-    }
-
-    /**
-     * Disable all controls
-     */
-    disableAllControls() {
-        this.connectBtn.disabled = true;
-        this.refreshBtn.disabled = true;
-        this.readConfigBtn.disabled = true;
-        this.writeConfigBtn.disabled = true;
-        this.deviceSelect.disabled = true;
-    }
-
-    /**
-     * Log a message
-     */
-    log(message, type = 'info') {
-        const timestamp = new Date().toLocaleTimeString();
-        const entry = document.createElement('div');
-        entry.className = `log-entry ${type}`;
-        entry.innerHTML = `<span class="log-timestamp">[${timestamp}]</span> ${this.escapeHtml(message)}`;
+      try {
+        log('Writing configuration to device...', 'info');
         
-        this.logContent.appendChild(entry);
-        // Auto-scroll to bottom
-        this.logContent.scrollTop = this.logContent.scrollHeight;
-        
-        // Limit log entries to 100
-        while (this.logContent.children.length > 100) {
-            this.logContent.removeChild(this.logContent.firstChild);
+        const configMappings = [
+          { key: 'sw1Press', switchNum: 0, eventType: 0 },
+          { key: 'sw1Release', switchNum: 0, eventType: 1 },
+          { key: 'sw2Press', switchNum: 1, eventType: 0 },
+          { key: 'sw2Release', switchNum: 1, eventType: 1 }
+        ];
+
+        for (const mapping of configMappings) {
+          const config = configurations[mapping.key];
+          const configData = {
+            msgType: getMsgTypeValue(config.msgType),
+            channel: config.channel - 1, // 1-based to 0-based
+            param1: config.param1,
+            param2: config.param2
+          };
+          
+          await midiManager.sendConfiguration(
+            mapping.switchNum,
+            mapping.eventType,
+            configData
+          );
+          
+          // Small delay between messages
+          await new Promise(resolve => setTimeout(resolve, 50));
         }
-    }
+        
+        saveCurrentConfigAsRead();
+        log('Configuration written successfully', 'success');
+      } catch (error) {
+        log(`Failed to write configuration: ${error.message}`, 'error');
+      }
+    };
 
-    /**
-     * Clear log
-     */
-    clearLog() {
-        this.logContent.innerHTML = '';
-        this.log('Log cleared', 'info');
-    }
 
-    /**
-     * Escape HTML for safe display
-     */
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
+    const saveToFile = () => {
+      const config = {
+        version: '2.0.0',
+        timestamp: new Date().toISOString(),
+        configurations: { ...configurations }
+      };
 
-    /**
-     * Get default configuration
-     */
-    getDefaultConfig() {
-        return {
-            'sw1-press': { msgType: 0, channel: 0, param1: 64, param2: 127 },
-            'sw1-release': { msgType: 0, channel: 0, param1: 64, param2: 0 },
-            'sw2-press': { msgType: 1, channel: 0, param1: 1, param2: 0 },
-            'sw2-release': { msgType: 1, channel: 0, param1: 0, param2: 0 }
+      const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `midi-config-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      log('Configuration saved to file', 'success');
+    };
+
+    const loadFromFile = () => {
+      fileInput.value?.click();
+    };
+
+    const handleFileLoad = (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const config = JSON.parse(e.target.result);
+          
+          if (!config.configurations) {
+            throw new Error('Invalid configuration file');
+          }
+
+          Object.assign(configurations, config.configurations);
+          saveCurrentConfigAsRead();
+          log('Configuration loaded from file', 'success');
+        } catch (error) {
+          log(`Failed to load configuration: ${error.message}`, 'error');
+        }
+      };
+      
+      reader.readAsText(file);
+      event.target.value = '';
+    };
+
+    const clearLog = () => {
+      logEntries.value = [];
+      log('Log cleared', 'info');
+    };
+
+    // Utility functions
+    const getConfigKey = (switchNum, eventType) => {
+      const switchName = switchNum === 0 ? 'sw1' : 'sw2';
+      const eventName = eventType === 0 ? 'Press' : 'Release';
+      return `${switchName}${eventName}`;
+    };
+
+    const getMsgTypeString = (msgType) => {
+      switch (msgType) {
+      case 0: return 'None';
+      case 1: return 'CC';
+      case 2: return 'PC';
+      case 3: return 'Note';
+      default: return 'None';
+      }
+    };
+
+    const getMsgTypeValue = (msgTypeString) => {
+      switch (msgTypeString.toUpperCase()) {
+      case 'NONE': return 0;
+      case 'CC': return 1;
+      case 'PC': return 2;
+      case 'NOTE': return 3;
+      default: return 0;
+      }
+    };
+
+    const saveCurrentConfigAsRead = () => {
+      readConfiguration.value = JSON.parse(JSON.stringify(configurations));
+    };
+
+    // LocalStorage functions
+    const saveLastConnectedDevice = (deviceId, deviceName) => {
+      try {
+        const deviceInfo = {
+          id: deviceId,
+          name: deviceName,
+          timestamp: Date.now()
         };
-    }
+        localStorage.setItem('midi-config-last-device', JSON.stringify(deviceInfo));
+        log(`Device info saved: ${deviceName}`, 'info');
+      } catch (error) {
+        log(`Failed to save device info: ${error.message}`, 'error');
+      }
+    };
 
-    /**
-     * LocalStorage management methods
-     */
-
-    /**
-     * 最後に接続したデバイス情報を保存
-     */
-    saveLastConnectedDevice(deviceId, deviceName) {
-        try {
-            const deviceInfo = {
-                id: deviceId,
-                name: deviceName,
-                timestamp: Date.now()
-            };
-            localStorage.setItem(this.STORAGE_KEYS.LAST_DEVICE, JSON.stringify(deviceInfo));
-            this.log(`デバイス情報を保存: ${deviceName}`, 'info');
-        } catch (error) {
-            this.log(`デバイス情報の保存に失敗: ${error.message}`, 'error');
+    const getLastConnectedDevice = () => {
+      try {
+        const stored = localStorage.getItem('midi-config-last-device');
+        if (stored) {
+          const deviceInfo = JSON.parse(stored);
+          // 24時間以内のデバイス情報のみ有効
+          if (Date.now() - deviceInfo.timestamp < 24 * 60 * 60 * 1000) {
+            return deviceInfo;
+          }
         }
-    }
+      } catch (error) {
+        log(`Failed to get device info: ${error.message}`, 'warning');
+      }
+      return null;
+    };
 
-    /**
-     * 最後に接続したデバイス情報を取得
-     */
-    getLastConnectedDevice() {
-        try {
-            const stored = localStorage.getItem(this.STORAGE_KEYS.LAST_DEVICE);
-            if (stored) {
-                const deviceInfo = JSON.parse(stored);
-                // 24時間以内のデバイス情報のみ有効
-                if (Date.now() - deviceInfo.timestamp < 24 * 60 * 60 * 1000) {
-                    return deviceInfo;
-                }
-            }
-        } catch (error) {
-            this.log(`デバイス情報の取得に失敗: ${error.message}`, 'warning');
-        }
-        return null;
-    }
+    const removeLastConnectedDevice = () => {
+      try {
+        localStorage.removeItem('midi-config-last-device');
+        log('Device info removed', 'info');
+      } catch (error) {
+        log(`Failed to remove device info: ${error.message}`, 'error');
+      }
+    };
 
-    /**
-     * 最後に接続したデバイス情報を削除
-     */
-    removeLastConnectedDevice() {
-        try {
-            localStorage.removeItem(this.STORAGE_KEYS.LAST_DEVICE);
-            this.log('デバイス情報を削除', 'info');
-        } catch (error) {
-            this.log(`デバイス情報の削除に失敗: ${error.message}`, 'error');
-        }
-    }
-
-    /**
-     * 現在の設定を初期設定として保存
-     */
-    saveCurrentConfigAsOriginal() {
-        try {
-            const currentConfig = {};
-            Object.keys(this.configElements).forEach(key => {
-                currentConfig[key] = this.getConfigFromUI(key);
-            });
-            this.originalConfig = JSON.parse(JSON.stringify(currentConfig)); // Deep copy
-            this.isModified = false;
-            this.updateModificationState();
-            this.log('初期設定として保存', 'info');
-        } catch (error) {
-            this.log(`初期設定の保存に失敗: ${error.message}`, 'error');
-        }
-    }
-
-    /**
-     * 設定が変更されているかチェック
-     */
-    checkConfigModified() {
-        if (!this.originalConfig) {
-            return false;
+    const tryAutoReconnect = async () => {
+      try {
+        const lastDevice = getLastConnectedDevice();
+        if (!lastDevice) {
+          log('No previous device found', 'info');
+          return;
         }
 
-        try {
-            let modified = false;
-            Object.keys(this.configElements).forEach(key => {
-                const current = this.getConfigFromUI(key);
-                const original = this.originalConfig[key];
-                
-                if (!original || 
-                    current.msgType !== original.msgType ||
-                    current.channel !== original.channel ||
-                    current.param1 !== original.param1 ||
-                    current.param2 !== original.param2) {
-                    modified = true;
-                }
-            });
-            
-            if (this.isModified !== modified) {
-                this.isModified = modified;
-                this.updateModificationState();
-            }
-            
-            return modified;
-        } catch (error) {
-            this.log(`変更検知エラー: ${error.message}`, 'error');
-            return false;
-        }
-    }
-
-    /**
-     * 変更状態に応じてUIを更新
-     */
-    updateModificationState() {
-        // Write to Deviceボタンの有効/無効制御
-        if (this.writeConfigBtn) {
-            this.writeConfigBtn.disabled = !this.isConnected || !this.isModified;
-        }
-
-        // 変更されたフィールドにmodifiedクラスを追加/削除
-        Object.keys(this.configElements).forEach(key => {
-            this.updateFieldModificationState(key);
-        });
-    }
-
-    /**
-     * 特定のフィールドの変更状態を更新
-     */
-    updateFieldModificationState(key) {
-        if (!this.originalConfig) return;
-
-        const elements = this.configElements[key];
-        const indicator = this.changeIndicators[key];
-        const current = this.getConfigFromUI(key);
-        const original = this.originalConfig[key];
+        log(`Attempting auto-reconnect: ${lastDevice.name}`, 'info');
         
-        const isFieldModified = !original || 
-            current.msgType !== original.msgType ||
-            current.channel !== original.channel ||
-            current.param1 !== original.param1 ||
-            current.param2 !== original.param2;
+        const targetDevice = availableDevices.value.find(device => 
+          device.id === lastDevice.id || device.name === lastDevice.name
+        );
 
-        // 全ての入力要素にmodifiedクラスを適用
-        [elements.type, elements.channel, elements.param1, elements.param2].forEach(element => {
-            if (element) {
-                if (isFieldModified) {
-                    element.classList.add('modified');
-                } else {
-                    element.classList.remove('modified');
-                }
-            }
-        });
-
-        // 変更インジケーターの表示/非表示制御
-        if (indicator) {
-            if (isFieldModified) {
-                indicator.style.display = 'inline';
-            } else {
-                indicator.style.display = 'none';
-            }
+        if (!targetDevice) {
+          log(`Previous device not found: ${lastDevice.name}`, 'warning');
+          return;
         }
-    }
-}
 
-// Initialize application
-const app = new Application();
+        selectedDeviceId.value = targetDevice.id;
+        
+        const connected = await midiManager.connectDevice(targetDevice.id);
+        if (connected) {
+          log(`Auto-reconnect successful: ${targetDevice.name}`, 'success');
+        } else {
+          log(`Auto-reconnect failed: ${targetDevice.name}`, 'warning');
+        }
+      } catch (error) {
+        log(`Auto-reconnect error: ${error.message}`, 'error');
+      }
+    };
+
+    // Setup MIDI Manager
+    const initializeMidiManager = async () => {
+      if (!navigator.requestMIDIAccess) {
+        webMidiStatus.value = 'Not Supported';
+        log('WebMIDI API is not supported in this browser', 'error');
+        return;
+      }
+
+      webMidiStatus.value = 'Supported';
+
+      // Setup event listeners
+      midiManager.addEventListener('connected', async (event) => {
+        isConnected.value = true;
+        log(`Connected to: ${event.detail.device}`, 'success');
+        
+        // Auto-read configuration after connection
+        try {
+          log('Auto-reading configuration from device...', 'info');
+          const configs = await midiManager.requestConfiguration();
+          
+          // Apply configurations
+          configs.forEach(config => {
+            const configKey = getConfigKey(config.switchNum, config.eventType);
+            if (configKey && configurations[configKey]) {
+              configurations[configKey].msgType = getMsgTypeString(config.msgType);
+              configurations[configKey].channel = config.channel + 1; // 0-based to 1-based
+              configurations[configKey].param1 = config.param1;
+              configurations[configKey].param2 = config.param2;
+            }
+          });
+          
+          // Save as read configuration
+          saveCurrentConfigAsRead();
+          log('Auto-configuration read completed', 'success');
+        } catch (error) {
+          log(`Auto-configuration read failed: ${error.message}`, 'warning');
+        }
+      });
+
+      midiManager.addEventListener('disconnected', () => {
+        isConnected.value = false;
+        log('Device disconnected', 'warning');
+      });
+
+      midiManager.addEventListener('error', (event) => {
+        log(event.detail.message, 'error');
+      });
+
+      midiManager.addEventListener('devicesChanged', (event) => {
+        availableDevices.value = event.detail.devices;
+      });
+
+      midiManager.addEventListener('sysexSent', (event) => {
+        const hexString = event.detail.data.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+        log(`SysEx Sent: ${hexString}`, 'sysex');
+      });
+
+      midiManager.addEventListener('midiMessage', (event) => {
+        const hexString = event.detail.data.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+        log(`MIDI Received: ${hexString}`, 'sysex');
+      });
+
+      midiManager.addEventListener('configReceived', (event) => {
+        log(`Config received: Switch ${event.detail.switchNum + 1} ${event.detail.eventType === 0 ? 'Press' : 'Release'}`, 'info');
+      });
+
+      // Initialize MIDI
+      const initialized = await midiManager.initialize();
+      if (initialized) {
+        log('WebMIDI initialized successfully', 'success');
+        refreshDevices();
+        await tryAutoReconnect();
+      } else {
+        log('Failed to initialize WebMIDI', 'error');
+      }
+    };
+
+    // Lifecycle
+    onMounted(() => {
+      initializeMidiManager();
+    });
+
+    return {
+      // State
+      isConnected,
+      selectedDeviceId,
+      availableDevices,
+      webMidiStatus,
+      logEntries,
+      configurations,
+      readConfiguration,
+      fileInput,
+      logContent,
+      
+      // Computed
+      connectionStatusText,
+      hasChanges,
+      
+      // Methods
+      refreshDevices,
+      handleConnect,
+      writeToDevice,
+      saveToFile,
+      loadFromFile,
+      handleFileLoad,
+      clearLog,
+      hasConfigChanged,
+      getParam1Label,
+      getParam2Label
+    };
+  }
+}).mount('#app');
