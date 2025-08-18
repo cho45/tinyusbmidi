@@ -84,14 +84,33 @@ GP4  ●─────●─── RING (Switch 2)
 
 ## ファームウェアのビルドと書き込み
 
-### 前提条件
+### 推奨開発環境: VSCode + Raspberry Pi Pico拡張機能
+
+VSCodeでの開発を強く推奨します。公式のRaspberry Pi Pico拡張機能により、環境設定からビルド・デバッグまで統合された開発体験が得られます。
+
+#### VSCode環境のセットアップ
+
+1. **VSCode**をインストール
+2. **Raspberry Pi Pico**拡張機能をインストール
+3. 拡張機能の指示に従ってPico SDKをセットアップ
+
+#### VSCodeでのビルド
+
+1. VSCodeでプロジェクトフォルダを開く
+2. **Ctrl+Shift+P** → **Raspberry Pi Pico: Configure Project** 
+3. **Ctrl+Shift+P** → **Raspberry Pi Pico: Compile Project**
+4. `build/`フォルダに`.uf2`ファイルが生成される
+
+### 手動ビルド手順（上級者向け）
+
+#### 前提条件
 
 1. **Pico SDK**の設定済み環境
 2. **CMake 3.13以上**
 3. **ARM GCC コンパイラ**
 4. **Ninja** (推奨)
 
-### ビルド手順
+#### ビルド手順
 
 ```bash
 # リポジトリのクローン
@@ -107,6 +126,17 @@ cmake .. -G Ninja
 
 # ビルド実行
 ninja
+```
+
+### 自動ビルド（GitHub Actions）
+
+リポジトリにタグ（例: `v1.0.0`）をプッシュすると、GitHub Actionsが自動的にファームウェアをビルドし、GitHubリリースに`.uf2`ファイルを添付します。
+
+```bash
+# リリースタグの作成と自動ビルド
+git tag v1.0.0
+git push origin v1.0.0
+# → GitHub Actionsが自動実行され、Releasesページに.uf2ファイルが作成される
 ```
 
 ### 書き込み方法
@@ -250,32 +280,3 @@ F0 00 7D 01 03 <switch> <event> <msgtype> <channel> <param1> <param2> F7
 - **MIDI**: USB MIDI Device Class
 - **ビルドシステム**: CMake + Ninja
 - **設定ツール**: WebMIDI API + HTML5
-
-### 対応DAW/ソフトウェア
-
-- ✅ **Ableton Live**
-- ✅ **FL Studio** 
-- ✅ **Logic Pro X**
-- ✅ **Cubase/Nuendo**
-- ✅ **Pro Tools**
-- ✅ **Reaper**
-- ✅ **Bitwig Studio**
-- ✅ **その他USB MIDI対応ソフト**
-
-## ライセンス
-
-このプロジェクトはMITライセンスの下で公開されています。
-
-## 貢献
-
-バグ報告、機能要求、プルリクエストを歓迎します。
-
-## 更新履歴
-
-### v1.0.0
-- 初回リリース
-- 2スイッチTRS入力対応
-- USB MIDI出力（CC/PC/Note）
-- SysEx設定変更機能
-- 不揮発性設定保存
-- WebMIDI設定ツール付属

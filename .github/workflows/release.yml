@@ -1,0 +1,74 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Cache Pico SDK
+        uses: actions/cache@v4
+        id: cache-pico-sdk
+        with:
+          path: ~/pico-sdk
+          key: pico-sdk-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: |
+            pico-sdk-${{ runner.os }}-
+
+      - name: Setup Pico SDK
+        if: steps.cache-pico-sdk.outputs.cache-hit != 'true'
+        run: |
+          cd ~
+          git clone https://github.com/raspberrypi/pico-sdk.git --depth 1
+          cd pico-sdk
+          git submodule update --init
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+
+      - name: Setup environment
+        run: |
+          echo "PICO_SDK_PATH=$HOME/pico-sdk" >> $GITHUB_ENV
+
+      - name: Create build directory
+        run: mkdir build
+
+      - name: Configure CMake
+        run: |
+          cd build
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build firmware
+        run: |
+          cd build
+          ninja
+
+      - name: Verify build output
+        run: |
+          ls -la build/
+          file build/tinyusbmidi.uf2
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        if: github.ref_type == 'tag'
+        with:
+          files: |
+            build/tinyusbmidi.uf2
+            build/tinyusbmidi.elf
+          generate_release_notes: true
+          make_latest: true
