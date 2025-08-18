@@ -296,6 +296,12 @@ createApp({
 
     const tryAutoReconnect = async () => {
       try {
+        // 既に接続されている場合はスキップ
+        if (isConnected.value) {
+          log('Device already connected, skipping auto-reconnect', 'info');
+          return;
+        }
+        
         const lastDevice = getLastConnectedDevice();
         if (!lastDevice) {
           log('No previous device found', 'info');
@@ -377,6 +383,32 @@ createApp({
 
       midiManager.addEventListener('devicesChanged', (event) => {
         availableDevices.value = event.detail.devices;
+        
+        // TinyUSB MIDI Footswitch デバイスを探して自動選択
+        const tinyUsbDevice = event.detail.devices.find(device => 
+          device.name === 'TinyUSB MIDI Footswitch'
+        );
+        
+        if (tinyUsbDevice) {
+          // まだ何も選択されていない、または異なるデバイスが選択されている場合
+          if (!selectedDeviceId.value || selectedDeviceId.value !== tinyUsbDevice.id) {
+            selectedDeviceId.value = tinyUsbDevice.id;
+            log(`TinyUSB MIDI Footswitch auto-selected: ${tinyUsbDevice.name}`, 'info');
+            
+            // 未接続で、かつ既に同じデバイスに接続されていない場合のみ自動接続
+            if (!isConnected.value) {
+              log('Attempting auto-connect to TinyUSB MIDI Footswitch...', 'info');
+              midiManager.connectDevice(tinyUsbDevice.id).then(connected => {
+                if (connected) {
+                  saveLastConnectedDevice(tinyUsbDevice.id, tinyUsbDevice.name);
+                  log(`Auto-connect successful: ${tinyUsbDevice.name}`, 'success');
+                } else {
+                  log(`Auto-connect failed: ${tinyUsbDevice.name}`, 'warning');
+                }
+              });
+            }
+          }
+        }
       });
 
       midiManager.addEventListener('sysexSent', (event) => {

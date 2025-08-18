@@ -78,6 +78,11 @@ class MidiManager extends EventTarget {
         throw new Error('Device not found');
       }
 
+      // 既に同じデバイスに接続されている場合はスキップ
+      if (this.isConnected && this.currentInput && this.currentInput.id === deviceId) {
+        return true;
+      }
+      
       // Disconnect current device if any
       if (this.isConnected) {
         this.disconnect();
