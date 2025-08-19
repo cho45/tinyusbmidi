@@ -17,6 +17,8 @@ Raspberry Pi Picoを使用したUSB MIDIフットスイッチデバイス
 
 ### スイッチの配線
 
+![配線図]( ./doc/tinymidi.drawio.png )
+
 ```
 TRSジャック（3.5mm ステレオ）
 ┌─ TIP ────→ GP3 (Switch 1)
