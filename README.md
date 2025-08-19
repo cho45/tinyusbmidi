@@ -21,15 +21,15 @@ Raspberry Pi Picoを使用したUSB MIDIフットスイッチデバイス
 
 ```
 TRSジャック（3.5mm ステレオ）
-┌─ TIP ────→ GP3 (Switch 1)
-├─ RING ───→ GP4 (Switch 2)
+┌─ TIP ────→ GP2 (Switch 1)
+├─ RING ───→ GP3 (Switch 2)
 └─ SLEEVE ─→ GND
 ```
 
 ```
 Raspberry Pi Pico配線
-GP3  ●────── TIP (Switch 1)
-GP4  ●────── RING (Switch 2)  
+GP2  ●────── TIP (Switch 1)
+GP3  ●────── RING (Switch 2)  
 GND  ●────── SLEEVE (GND)
 ```
 
@@ -71,7 +71,7 @@ ninja
 
 #### ハードウェア
 - **MCU**: RP2040
-- **GPIO**: GP3(TIP), GP4(RING) - 内部プルアップ有効
+- **GPIO**: GP2(TIP), GP3(RING) - 内部プルアップ有効
 - **デバウンス**: 20ms
 
 #### MIDI機能

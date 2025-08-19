@@ -9,8 +9,8 @@
 #include "pico/flash.h"
 #include "hardware/sync.h"
 
-#define TIP_PIN 3    // TRS Tip (Switch 1)
-#define RING_PIN 4   // TRS Ring (Switch 2)
+#define TIP_PIN 2    // TRS Tip (Switch 1)
+#define RING_PIN 3   // TRS Ring (Switch 2)
 
 #define DEBOUNCE_TIME_MS 20
 #define MIDI_CABLE_NUM 0
