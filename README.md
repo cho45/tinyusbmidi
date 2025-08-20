@@ -104,14 +104,53 @@ F0 00 7D 01 03 <switch> <event> <msgtype> <channel> <param1> <param2> F7
 - `param1`: CC Number/PC Number/Note Number (0-127)
 - `param2`: CC Value/Note Velocity (0-127)
 
+**設定例**
+
+Sustain Pedal:
+```
+Press:   F0 00 7D 01 01 00 00 01 00 40 7F F7
+Release: F0 00 7D 01 01 00 01 01 00 40 00 F7
+```
+
+Program Change:
+```
+Press:   F0 00 7D 01 01 01 00 02 00 01 00 F7
+Release: F0 00 7D 01 01 01 01 02 00 00 00 F7
+```
+
+Note On/Off:
+```
+Press:   F0 00 7D 01 01 00 00 03 00 3C 7F F7
+Release: F0 00 7D 01 01 00 01 03 00 3C 00 F7
+```
+
+スイッチ無効化:
+```
+Release: F0 00 7D 01 01 00 01 00 00 00 00 F7
+```
+
+設定読み出し:
+```
+要求: F0 00 7D 01 02 F7
+```
+
 ### デバッグ
 
+**シリアル出力**
 ```bash
-# シリアル出力: GP0(TX), GP1(RX) - 115200 baud
+# GP0(TX), GP1(RX) - 115200 baud
 # picotoolでの書き込み
 picotool load tinyusbmidi.uf2
 picotool reboot
 ```
+
+**SysExテスト手順**
+1. MIDIモニタープログラムでデバイス確認
+2. `F0 00 7D 01 02 F7` を送信して現在設定を読み出し
+3. 上記設定例のSysExメッセージで設定変更
+4. 再度設定読み出しで変更確認
+5. フットスイッチ操作でMIDIメッセージ送信確認
+6. 電源再投入後の設定保持確認
 
 ### トラブルシューティング
 

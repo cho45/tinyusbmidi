@@ -55,6 +55,14 @@ typedef struct {
 
 #define CONFIG_MAGIC 0x4D494449
 
+// SysEx Protocol Constants
+#define SYSEX_START_BYTE 0xF0
+#define SYSEX_END_BYTE 0xF7
+#define SYSEX_MANUFACTURER_ID_1 0x00
+#define SYSEX_MANUFACTURER_ID_2 0x7D
+#define SYSEX_DEVICE_ID 0x01
+#define SYSEX_BASIC_MIN_LENGTH 6
+
 static device_config_t current_config;
 static bool switch1_state = false;
 static bool switch2_state = false;
@@ -80,52 +88,23 @@ bool send_config_response(uint8_t switch_num, uint8_t event_type, const midi_con
     }
     
     uint8_t sysex_msg[] = {
-        0xF0, 0x00, 0x7D, 0x01, SYSEX_CMD_CONFIG_RESPONSE,
+        SYSEX_START_BYTE, SYSEX_MANUFACTURER_ID_1, SYSEX_MANUFACTURER_ID_2, SYSEX_DEVICE_ID, SYSEX_CMD_CONFIG_RESPONSE,
         switch_num, event_type, config->msg_type, config->channel,
-        config->param1, config->param2, 0xF7
+        config->param1, config->param2, SYSEX_END_BYTE
     };
     
-    uint32_t written = tud_midi_stream_write(MIDI_CABLE_NUM, sysex_msg, 12);
+    uint32_t written = tud_midi_stream_write(MIDI_CABLE_NUM, sysex_msg, sizeof(sysex_msg));
     printf("Response sent: %d bytes\\n", written);
-    return written == 12;
-}
-
-static uint8_t config_send_index = 0;
-
-void send_next_config(void) {
-    if (!tud_midi_mounted()) return;
-    
-    switch(config_send_index) {
-        case 0:
-            if (send_config_response(0, SWITCH_EVENT_PRESS, &current_config.switch1_press)) {
-                config_send_index = 1;
-            }
-            break;
-        case 1:
-            if (send_config_response(0, SWITCH_EVENT_RELEASE, &current_config.switch1_release)) {
-                config_send_index = 2;
-            }
-            break;
-        case 2:
-            if (send_config_response(1, SWITCH_EVENT_PRESS, &current_config.switch2_press)) {
-                config_send_index = 3;
-            }
-            break;
-        case 3:
-            if (send_config_response(1, SWITCH_EVENT_RELEASE, &current_config.switch2_release)) {
-                config_send_index = 0; // Reset for next request
-            }
-            break;
-        default:
-            config_send_index = 0;
-            break;
-    }
+    return written == sizeof(sysex_msg);
 }
 
 void send_all_config(void) {
     printf("Sending all config\n");
-    config_send_index = 0;
-    send_next_config();
+    
+    send_config_response(0, SWITCH_EVENT_PRESS, &current_config.switch1_press);
+    send_config_response(0, SWITCH_EVENT_RELEASE, &current_config.switch1_release);
+    send_config_response(1, SWITCH_EVENT_PRESS, &current_config.switch2_press);
+    send_config_response(1, SWITCH_EVENT_RELEASE, &current_config.switch2_release);
 }
 
 void init_default_config(void) {
@@ -280,13 +259,13 @@ void check_switches(void) {
 void process_sysex_data(const uint8_t* data, uint16_t length) {
     printf("Process SysEx: len=%d\n", length);
     // Basic validation
-    if (length < 6 || data[0] != 0xF0 || data[length-1] != 0xF7) {
+    if (length < SYSEX_BASIC_MIN_LENGTH || data[0] != SYSEX_START_BYTE || data[length-1] != SYSEX_END_BYTE) {
         printf("Invalid SysEx\n");
         return;
     }
     
     // Check manufacturer ID and device type
-    if (data[1] != 0x00 || data[2] != 0x7D || data[3] != 0x01) {
+    if (data[1] != SYSEX_MANUFACTURER_ID_1 || data[2] != SYSEX_MANUFACTURER_ID_2 || data[3] != SYSEX_DEVICE_ID) {
         return;
     }
     
@@ -295,7 +274,7 @@ void process_sysex_data(const uint8_t* data, uint16_t length) {
     // Handle commands
     if (command == SYSEX_CMD_GET_CONFIG) {
         printf("GET_CONFIG command\n");
-        if (length == 6) {
+        if (length == SYSEX_BASIC_MIN_LENGTH) {
             send_all_config();
         }
         return;
@@ -357,7 +336,6 @@ void tud_midi_rx_cb(uint8_t port) {
     uint8_t midi_data[32]; // Buffer for MIDI stream data
     
     while (tud_midi_available()) {
-        // Read MIDI stream data (no USB packet handling needed!)
         uint32_t bytes_read = tud_midi_stream_read(midi_data, sizeof(midi_data));
         if (bytes_read == 0) break;
         
@@ -366,14 +344,13 @@ void tud_midi_rx_cb(uint8_t port) {
         // Process pure MIDI data stream
         for (uint32_t i = 0; i < bytes_read; i++) {
             uint8_t byte = midi_data[i];
-            printf("MIDI byte: %02X\n", byte);
             
-            if (byte == 0xF0) {
+            if (byte == SYSEX_START_BYTE) {
                 // Start of SysEx
                 printf("SysEx start\n");
                 sysex_pos = 0;
                 sysex_buffer[sysex_pos++] = byte;
-            } else if (byte == 0xF7) {
+            } else if (byte == SYSEX_END_BYTE) {
                 // End of SysEx  
                 printf("SysEx end, pos=%d\n", sysex_pos);
                 if (sysex_pos < SYSEX_BUFFER_SIZE) {
@@ -386,6 +363,8 @@ void tud_midi_rx_cb(uint8_t port) {
                 // Data byte (only process if we're in a SysEx)
                 printf("SysEx data: %02X\n", byte);
                 sysex_buffer[sysex_pos++] = byte;
+            } else {
+                printf("MIDI byte: %02X\n", byte);
             }
         }
     }
@@ -416,23 +395,6 @@ int main(void) {
     while (1) {
         tud_task();
         check_switches();
-        
-        // Send remaining config responses if in progress
-        if (config_send_index > 0) {
-            send_next_config();
-        }
-        
-        // MIDI processing is now handled in tud_midi_rx_cb()
-        
-        // Heartbeat debug disabled
-        // static uint32_t last_heartbeat = 0;
-        // uint32_t now = board_millis();
-        // if (now - last_heartbeat > 2000) {
-        //     printf("Heartbeat: %d ms, MIDI mounted: %d\n", 
-        //            now, tud_midi_mounted());
-        //     last_heartbeat = now;
-        // }
-        
         board_led_write(tud_mounted());
     }
     

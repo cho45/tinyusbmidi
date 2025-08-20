@@ -3,6 +3,9 @@
  * Handles all MIDI device communication for TinyUSB MIDI Footswitch
  */
 
+// SysEx Protocol Constants
+const SYSEX_CONFIG_RESPONSE_LENGTH = 12;
+
 class MidiManager extends EventTarget {
   constructor() {
     super();
@@ -273,7 +276,7 @@ class MidiManager extends EventTarget {
      * Handle configuration response from device
      */
   handleConfigResponse(data) {
-    if (data.length !== 12) {
+    if (data.length !== SYSEX_CONFIG_RESPONSE_LENGTH) {
       this.dispatchEvent(new CustomEvent('error', { 
         detail: { message: 'Invalid configuration response length' }
       }));
