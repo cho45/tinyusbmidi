@@ -19,6 +19,11 @@
 
 #define FLASH_TARGET_OFFSET (256 * 1024)
 
+// LED control constants
+#define LED_PIN PICO_DEFAULT_LED_PIN  // GPIO25
+#define LED_BLINK_PERIOD_MS 250       // 点滅周期（0.5秒）
+#define LED_BLINK_COUNT 3             // 点滅回数
+
 typedef enum {
     MIDI_MSG_NONE = 0,
     MIDI_MSG_CC = 1,
@@ -68,6 +73,17 @@ static bool switch1_state = false;
 static bool switch2_state = false;
 static uint32_t switch1_debounce_time = 0;
 static uint32_t switch2_debounce_time = 0;
+
+// LED control variables
+static bool led_blink_active = false;
+static uint32_t led_blink_start_time = 0;
+static uint8_t led_blink_remaining = 0;
+static bool led_blink_state = false;
+static uint32_t led_last_toggle_time = 0;
+
+// Function prototypes
+void start_led_blink(void);
+void update_led_state(void);
 
 // Validation functions
 bool validate_midi_config(const midi_config_t* config) {
@@ -224,6 +240,34 @@ void send_midi_message(const midi_config_t* config) {
     
     if (tud_midi_mounted()) {
         tud_midi_stream_write(MIDI_CABLE_NUM, packet, 4);
+        start_led_blink();  // MIDI送信時にLED点滅開始
+    }
+}
+
+void start_led_blink(void) {
+    led_blink_active = true;
+    led_blink_remaining = LED_BLINK_COUNT * 2; // ON/OFFで2回カウント
+    led_blink_start_time = board_millis();
+    led_last_toggle_time = led_blink_start_time;
+    led_blink_state = true;
+}
+
+void update_led_state(void) {
+    if (led_blink_active) {
+        uint32_t now = board_millis();
+        if (now - led_last_toggle_time >= LED_BLINK_PERIOD_MS / 2) {
+            led_blink_state = !led_blink_state;
+            led_last_toggle_time = now;
+            led_blink_remaining--;
+            
+            if (led_blink_remaining == 0) {
+                led_blink_active = false;
+            }
+        }
+        board_led_write(led_blink_state);
+    } else {
+        // 通常時はUSB接続状態を表示
+        board_led_write(tud_mounted());
     }
 }
 
@@ -340,6 +384,7 @@ void tud_midi_rx_cb(uint8_t port) {
         if (bytes_read == 0) break;
         
         printf("MIDI stream: %d bytes\n", bytes_read);
+        start_led_blink();  // MIDI受信時にLED点滅開始
         
         // Process pure MIDI data stream
         for (uint32_t i = 0; i < bytes_read; i++) {
@@ -395,7 +440,7 @@ int main(void) {
     while (1) {
         tud_task();
         check_switches();
-        board_led_write(tud_mounted());
+        update_led_state();
     }
     
     return 0;
