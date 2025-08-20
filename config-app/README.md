@@ -1,19 +1,22 @@
-# TinyUSB MIDI Footswitch Configurator
+# TinyUSB MIDI Footswitch Configurator (Multi-Switch/Multi-Message)
 
-WebMIDI APIを使用したTinyUSB MIDI フットスイッチデバイス設定ツール
+Vue.js 3 + WebMIDI APIを使用したTinyUSB MIDI フットスイッチデバイス設定ツール（複数スイッチ・複数メッセージ対応）
 
 ## 概要
 
-このWebアプリケーションは、TinyUSB MIDIフットスイッチデバイスの設定をブラウザから行うためのツールです。WebMIDI APIとSysExメッセージを使用して、デバイスの動作設定を読み書きできます。
+このWebアプリケーションは、TinyUSB MIDIフットスイッチデバイスの設定をブラウザから行うためのツールです。Vue.js 3 Composition APIによる最新のリアクティブUIと、WebMIDI APIを活用したSysExプロトコル通信により、複数スイッチ・複数メッセージに対応した高度な設定管理を提供します。
 
 ## 機能
 
-- **デバイス接続管理**: 利用可能なMIDIデバイスの検出と接続
-- **設定の読み書き**: SysExプロトコルによるデバイス設定の送受信
-- **4つの設定項目**: Switch1/2 × Press/Releaseの個別設定
-- **設定の保存/読み込み**: ローカルファイルへの設定保存と読み込み
-- **リアルタイムログ**: 通信状況とエラーの表示
-- **レスポンシブデザイン**: モバイルデバイスにも対応
+- **Vue.js 3 Composition API**: 高速でリアクティブなモダンWeb UI
+- **複数スイッチ対応**: 1〜16個のスイッチを動的に検出・設定
+- **複数メッセージ管理**: 各スイッチのPress/Releaseイベント毎に最大10個のMIDIメッセージを設定
+- **デバイス自動検出**: TinyUSB MIDI Footswitchの自動認識・接続
+- **リアルタイム変更検出**: 未保存変更のディープ比較による視覚的フィードバック
+- **設定バックアップ**: JSON形式でのローカルファイル保存・復元
+- **ライブコミュニケーションログ**: SysEx通信とエラーのリアルタイム表示
+- **ローディング状態管理**: 設定読み込み・保存時のUI無効化
+- **レスポンシブデザイン**: モバイルデバイス対応ダークテーマ
 
 ## 必要要件
 
@@ -28,32 +31,18 @@ WebMIDI APIを使用したTinyUSB MIDI フットスイッチデバイス設定�
 1. 直接ファイルを開く:
    - `config-app/index.html`をWebMIDI対応ブラウザで直接開く
    
-2. ローカルサーバーを使用する場合:
+2. ローカルサーバーを使用する場合（推奨）:
    ```bash
    cd config-app
-   npx serve .
+   npm run serve
+   # または: npx serve .
    # ブラウザで表示されるURL（通常 http://localhost:3000）を開く
    ```
 
-### 2. デバイスの接続
-
-1. TinyUSB MIDI FootswitchデバイスをUSBで接続
-2. **Device Connection**セクションのドロップダウンからデバイスを選択
-3. **Connect**ボタンをクリック
-4. ブラウザのMIDIアクセス許可ダイアログで許可を選択
-
-### 3. 設定の読み込み
-
-1. デバイス接続後、**Read from Device**ボタンをクリック
-2. 現在のデバイス設定が各フォームに反映される
-3. ログエリアで通信状況を確認
-
-### 4. 設定の編集
-
-各スイッチの設定項目:
+**各メッセージの設定項目:**
 
 - **Type**: メッセージタイプ（None/CC/PC/Note）
-  - None: 何もしない（MIDIメッセージを送信しない）
+  - None: 無効（MIDIメッセージを送信しない）
   - CC: Control Change
   - PC: Program Change
   - Note: Note On/Off
@@ -64,19 +53,25 @@ WebMIDI APIを使用したTinyUSB MIDI フットスイッチデバイス設定�
   - Note: ノート番号（0-127）
 - **Parameter 2**:
   - CC: 値（0-127）
-  - PC: 使用しない
+  - PC: 未使用（0固定）
   - Note: ベロシティ（0-127）
+
+**変更検出機能:**
+- 未保存の変更があるスイッチ・イベントは視覚的にハイライト表示
+- 変更されたメッセージは個別に強調表示
 
 ### 5. 設定の書き込み
 
-1. 設定を編集後、**Write to Device**ボタンをクリック
-2. 設定がデバイスに送信される
-3. デバイスは設定を不揮発性メモリに保存
+1. 設定を編集後、**Save Configurations**ボタンをクリック
+2. 新しいSysExプロトコルで各スイッチの設定が個別に送信される
+3. デバイスは設定を不揮発性フラッシュメモリに自動保存
+4. 送信状況はリアルタイムログで確認可能
 
-### 6. 設定の保存/読み込み（ローカル）
+### 6. 設定のバックアップ/復元
 
-- **Save to File**: 現在の設定をJSONファイルとして保存
-- **Load from File**: 保存したJSONファイルから設定を読み込み
+- **Save to File**: 現在の設定をJSON形式でローカルファイルに保存
+- **Load from File**: 保存したJSONファイルから設定を復元
+- バックアップには全スイッチの全メッセージ設定が含まれる
 
 ## 開発情報
 
@@ -84,17 +79,21 @@ WebMIDI APIを使用したTinyUSB MIDI フットスイッチデバイス設定�
 
 ```
 config-app/
-├── index.html       # メインHTML
-├── style.css        # スタイルシート
-├── app.js           # アプリケーションロジック
-├── midi-manager.js  # MIDI通信管理
-└── README.md        # このファイル
+├── index.html           # メインHTML（Vue.js CDN読み込み）
+├── app.js               # Vue.js 3 Composition API アプリケーション
+├── midi-manager.js      # WebMIDI API ラッパーとSysExプロトコル
+├── style.css            # ダークテーマUI + レスポンシブデザイン
+├── package.json         # NPM設定（v2.0.0, ESLint設定含む）
+├── eslint.config.js     # ESLint設定（ES6+ + globals）
+└── README.md            # このファイル
 ```
 
 ### 技術スタック
 
-- **HTML5**: 構造とレイアウト
-- **CSS3**: スタイリングとレスポンシブデザイン
-- **JavaScript (ES6+)**: アプリケーションロジック
-- **WebMIDI API**: MIDI通信
-- **Local Storage API**: 設定の保存
+- **Vue.js 3**: Composition API、リアクティブ状態管理、computed properties
+- **HTML5**: ES6 Modules、Import Maps による依存関係管理
+- **CSS3**: Grid Layout、ダークテーマ、レスポンシブデザイン
+- **JavaScript (ES6+)**: ES Modules、Async/Await、Event-driven architecture
+- **WebMIDI API**: SysExメッセージ送受信、デバイス状態監視
+- **File API**: JSON形式での設定バックアップ・復元
+- **ESLint**: コード品質管理（ES6+対応）

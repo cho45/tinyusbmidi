@@ -40,7 +40,22 @@ GND  ●────── SLEEVE (GND)
 
 ### 設定変更
 
-[オンライン設定ツール](https://cho45.github.io/tinyusbmidi/) でMIDIメッセージをカスタマイズできます。
+#### オンライン設定ツール
+[https://cho45.github.io/tinyusbmidi/](https://cho45.github.io/tinyusbmidi/)
+
+#### ローカル設定ツール
+```bash
+cd config-app
+npm run serve
+# ブラウザで http://localhost:3000 を開く
+```
+
+**設定ツールの特徴:**
+- **WebMIDI API** による直接通信
+- **複数スイッチ対応** - デバイスのピン数に応じて動的にUI生成
+- **複数メッセージ** - 各スイッチのPress/Releaseで最大10個のMIDIメッセージを設定
+- **リアルタイム変更検出** - 未保存変更の視覚的フィードバック
+- **設定バックアップ** - JSON形式でのローカル保存/読み込み
 
 ## 開発者向け
 
@@ -71,10 +86,14 @@ ninja
 ├── usb_descriptors.c       # USB MIDI記述子
 ├── tusb_config.h           # TinyUSB設定
 ├── CMakeLists.txt          # ビルド設定
-└── config-app/             # WebMIDI設定ツール（ローカル版）
-    ├── index.html
-    ├── app.js
-    └── midi-manager.js
+└── config-app/             # WebMIDI設定ツール (Vue.js 3 + WebMIDI API)
+    ├── index.html           # メインHTML（Vue.js CDN読み込み）
+    ├── app.js               # Vue.js 3 Composition API アプリケーション
+    ├── midi-manager.js      # WebMIDI API ラッパーとSysExプロトコル
+    ├── style.css            # ダークテーマUI + レスポンシブデザイン
+    ├── package.json         # NPM設定（v2.0.0, ESLint設定含む）
+    ├── eslint.config.js     # ESLint設定
+    └── README.md            # 設定ツール詳細仕様
 ```
 
 ### GPIOピン設定
@@ -110,6 +129,21 @@ cmake .. -G Ninja -DGPIO_PINS="3,5,7,9,11"
 - **デバイス名**: TinyUSB MIDI Footswitch
 - **対応メッセージ**: CC、PC、Note On/Off
 - **設定保存**: フラッシュメモリ（256KB offset）
+
+#### WebMIDI設定ツール (Vue.js 3)
+- **app.js**: Vue.js 3 Composition API アプリケーション（リアクティブ状態管理）
+- **midi-manager.js**: WebMIDI API ラッパー（イベント駆動 SysEx プロトコル）
+- **index.html**: 複数スイッチ・複数メッセージ対応動的UI
+- **style.css**: ダークテーマ（ローディング状態・変更インジケーター付き）
+
+**主要機能:**
+- **自動接続**: TinyUSB MIDI Footswitch の自動検出・接続
+- **マルチスイッチUI**: デバイスのスイッチ数に応じた動的インターフェース生成
+- **マルチメッセージ管理**: スイッチイベント毎に最大10個のメッセージを直感的UI で設定
+- **リアルタイム変更検出**: 未保存変更のディープ比較による視覚的フィードバック
+- **ローディング状態**: 設定読み込み・保存時のUI無効化
+- **ファイル操作**: JSON形式での設定バックアップ・復元
+- **ライブログ**: リアルタイムMIDI・SysEx通信モニター
 
 ### デバッグ
 
