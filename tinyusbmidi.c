@@ -8,6 +8,7 @@
 #include "hardware/flash.h" 
 #include "pico/flash.h"
 #include "hardware/sync.h"
+#include "switch_pins.h"
 
 // === 設定定数 ===
 #define MAX_SWITCHES 16              // 最大スイッチ数（GPIOの数に応じて調整可能）
@@ -21,9 +22,7 @@
 // ヘッダ/フッタ: magic(4) + num_switches(1) + checksum(4) = 9バイト
 // 合計: 1,321バイト（RP2040のRAM 264KB、Flash 2MBに対して十分小さい）
 
-// ピン番号の配列（実際に使用するピンを定義）
-static const uint8_t switch_pins[] = {2, 3};  // GPIO2, GPIO3 switch
-static const uint8_t num_switches = sizeof(switch_pins) / sizeof(switch_pins[0]);
+// ピン番号の配列はswitch_pins.hで定義（CMakeで生成）
 
 #define DEBOUNCE_TIME_MS 20
 #define MIDI_CABLE_NUM 0

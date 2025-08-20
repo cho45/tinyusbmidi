@@ -25,6 +25,17 @@ project(tinyusbmidi C CXX ASM)
 
 pico_sdk_init()
 
+# GPIO pins configuration option
+set(GPIO_PINS "2,3" CACHE STRING "Comma-separated list of GPIO pins for switches")
+
+# Process GPIO_PINS to generate switch_pins.h
+string(REPLACE "," ";" PIN_LIST ${GPIO_PINS})
+list(LENGTH PIN_LIST NUM_SWITCHES)
+string(REPLACE ";" ", " SWITCH_PINS_ARRAY "${PIN_LIST}")
+
+# Configure the header file
+configure_file(switch_pins.h.in switch_pins.h @ONLY)
+
 add_executable(tinyusbmidi
     tinyusbmidi.c
     usb_descriptors.c
@@ -32,6 +43,7 @@ add_executable(tinyusbmidi
 
 target_include_directories(tinyusbmidi PUBLIC
     .
+    ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 target_link_libraries(tinyusbmidi 

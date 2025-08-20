@@ -19,6 +19,7 @@ Raspberry Pi Picoを使用したUSB MIDIフットスイッチデバイス
 
 ![配線図]( ./doc/tinymidi.drawio.png )
 
+**デフォルト構成（2スイッチ）：**
 ```
 TRSジャック（3.5mm ステレオ）
 ┌─ TIP ────→ GP2 (Switch 1)
@@ -35,6 +36,8 @@ GND  ●────── SLEEVE (GND)
 
 内部プルアップを利用しているので追加のパーツは不要です。
 
+> **注意**: カスタムGPIOピン設定でビルドした場合は、設定したピン番号に合わせて配線してください。
+
 ### 設定変更
 
 [オンライン設定ツール](https://cho45.github.io/tinyusbmidi/) でMIDIメッセージをカスタマイズできます。
@@ -50,7 +53,14 @@ GND  ●────── SLEEVE (GND)
 ```bash
 # ビルド手順
 mkdir build && cd build
+
+# デフォルト設定（GP2, GP3）
 cmake .. -G Ninja
+
+# カスタムGPIOピン設定
+cmake .. -G Ninja -DGPIO_PINS="2,3,4,5"
+
+# ビルド実行
 ninja
 ```
 
@@ -67,72 +77,39 @@ ninja
     └── midi-manager.js
 ```
 
+### GPIOピン設定
+
+ビルド時にCMakeオプションで任意のGPIOピンを設定できます：
+
+```bash
+# デフォルト（2ピン）
+cmake .. -G Ninja
+
+# 4ピン設定
+cmake .. -G Ninja -DGPIO_PINS="2,3,4,5"
+
+# 任意の組み合わせ
+cmake .. -G Ninja -DGPIO_PINS="3,5,7,9,11"
+```
+
+**設定可能な範囲：**
+- **ピン数**: 1〜16個まで
+- **GPIO番号**: RP2040の有効なGPIO（0-28）
+- **内部プルアップ**: 自動で有効化
+- **配線**: 各ピンをスイッチのオープンドレインで接続
+
 ### 技術仕様
 
 #### ハードウェア
 - **MCU**: RP2040
-- **GPIO**: GP2(TIP), GP3(RING) - 内部プルアップ有効
+- **GPIO**: デフォルトGP2(TIP), GP3(RING) - 内部プルアップ有効（ビルド時設定可能）
+- **最大スイッチ数**: 16個まで対応
 - **デバウンス**: 20ms
 
 #### MIDI機能
 - **デバイス名**: TinyUSB MIDI Footswitch
 - **対応メッセージ**: CC、PC、Note On/Off
 - **設定保存**: フラッシュメモリ（256KB offset）
-
-#### SysExプロトコル
-
-**設定書き込み**
-```
-F0 00 7D 01 01 <switch> <event> <msgtype> <channel> <param1> <param2> F7
-```
-
-**設定読み出し要求**
-```
-F0 00 7D 01 02 F7
-```
-
-**設定読み出し応答**
-```
-F0 00 7D 01 03 <switch> <event> <msgtype> <channel> <param1> <param2> F7
-```
-
-**パラメータ**
-- `switch`: 0=Switch1(Tip), 1=Switch2(Ring)
-- `event`: 0=Press, 1=Release  
-- `msgtype`: 0=None, 1=CC, 2=PC, 3=Note
-- `channel`: MIDI Channel (0-15)
-- `param1`: CC Number/PC Number/Note Number (0-127)
-- `param2`: CC Value/Note Velocity (0-127)
-
-**設定例**
-
-Sustain Pedal:
-```
-Press:   F0 00 7D 01 01 00 00 01 00 40 7F F7
-Release: F0 00 7D 01 01 00 01 01 00 40 00 F7
-```
-
-Program Change:
-```
-Press:   F0 00 7D 01 01 01 00 02 00 01 00 F7
-Release: F0 00 7D 01 01 01 01 02 00 00 00 F7
-```
-
-Note On/Off:
-```
-Press:   F0 00 7D 01 01 00 00 03 00 3C 7F F7
-Release: F0 00 7D 01 01 00 01 03 00 3C 00 F7
-```
-
-スイッチ無効化:
-```
-Release: F0 00 7D 01 01 00 01 00 00 00 00 F7
-```
-
-設定読み出し:
-```
-要求: F0 00 7D 01 02 F7
-```
 
 ### デバッグ
 
@@ -143,15 +120,6 @@ Release: F0 00 7D 01 01 00 01 00 00 00 00 F7
 picotool load tinyusbmidi.uf2
 picotool reboot
 ```
-
-**SysExテスト手順**
-1. MIDIモニタープログラムでデバイス確認
-2. `F0 00 7D 01 02 F7` を送信して現在設定を読み出し
-3. 上記設定例のSysExメッセージで設定変更
-4. 再度設定読み出しで変更確認
-5. フットスイッチ操作でMIDIメッセージ送信確認
-6. 電源再投入後の設定保持確認
-
 ### トラブルシューティング
 
 **デバイスが認識されない**
