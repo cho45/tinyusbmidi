@@ -9,8 +9,21 @@
 #include "pico/flash.h"
 #include "hardware/sync.h"
 
-#define TIP_PIN 2    // TRS Tip (Switch 1)
-#define RING_PIN 3   // TRS Ring (Switch 2)
+// === 設定定数 ===
+#define MAX_SWITCHES 16              // 最大スイッチ数（GPIOの数に応じて調整可能）
+#define MAX_MESSAGES_PER_EVENT 10    // 各イベントあたりの最大メッセージ数
+
+// === メモリ使用量の計算 ===
+// 各MIDIメッセージ: 4バイト (msg_type, channel, param1, param2)
+// 各イベント: 1バイト (message_count) + 10 * 4バイト (messages) = 41バイト
+// 各スイッチ: 2イベント * 41バイト = 82バイト
+// 16スイッチの場合: 16 * 82 = 1,312バイト
+// ヘッダ/フッタ: magic(4) + num_switches(1) + checksum(4) = 9バイト
+// 合計: 1,321バイト（RP2040のRAM 264KB、Flash 2MBに対して十分小さい）
+
+// ピン番号の配列（実際に使用するピンを定義）
+static const uint8_t switch_pins[] = {2, 3};  // GPIO2, GPIO3 switch
+static const uint8_t num_switches = sizeof(switch_pins) / sizeof(switch_pins[0]);
 
 #define DEBOUNCE_TIME_MS 20
 #define MIDI_CABLE_NUM 0
@@ -37,9 +50,9 @@ typedef enum {
 } switch_event_t;
 
 typedef enum {
-    SYSEX_CMD_SET_CONFIG = 0x01,
-    SYSEX_CMD_GET_CONFIG = 0x02,
-    SYSEX_CMD_CONFIG_RESPONSE = 0x03
+    SYSEX_CMD_GET_INFO = 0x01,      // スイッチ数やバージョンを返す
+    SYSEX_CMD_GET_MESSAGE = 0x02,   // 特定のスイッチの設定を取得
+    SYSEX_CMD_SET_MESSAGE = 0x03    // 特定のスイッチの設定をセット
 } sysex_command_t;
 
 typedef struct {
@@ -49,12 +62,23 @@ typedef struct {
     uint8_t param2;
 } midi_config_t;
 
+// 各スイッチの状態管理
+typedef struct {
+    bool state;
+    uint32_t debounce_time;
+} switch_state_t;
+
+// イベント設定（複数メッセージ対応）
+typedef struct {
+    uint8_t message_count;                          // 実際のメッセージ数
+    midi_config_t messages[MAX_MESSAGES_PER_EVENT]; // メッセージ配列
+} event_config_t;
+
+// デバイス全体の設定
 typedef struct {
     uint32_t magic;
-    midi_config_t switch1_press;
-    midi_config_t switch1_release;
-    midi_config_t switch2_press;
-    midi_config_t switch2_release;
+    uint8_t num_switches;                    // 実際のスイッチ数
+    event_config_t events[MAX_SWITCHES * 2]; // [switch_idx * 2 + event_type]
     uint32_t checksum;
 } device_config_t;
 
@@ -68,11 +92,8 @@ typedef struct {
 #define SYSEX_DEVICE_ID 0x01
 #define SYSEX_BASIC_MIN_LENGTH 6
 
+static switch_state_t switch_states[MAX_SWITCHES];
 static device_config_t current_config;
-static bool switch1_state = false;
-static bool switch2_state = false;
-static uint32_t switch1_debounce_time = 0;
-static uint32_t switch2_debounce_time = 0;
 
 // LED control variables
 static bool led_blink_active = false;
@@ -97,39 +118,39 @@ bool is_debounce_elapsed(uint32_t last_time, uint32_t current_time) {
     return (current_time - last_time) >= DEBOUNCE_TIME_MS;
 }
 
-bool send_config_response(uint8_t switch_num, uint8_t event_type, const midi_config_t* config) {
-    if (!tud_midi_mounted()) {
-        printf("MIDI not mounted\n");
-        return false;
-    }
-    
-    uint8_t sysex_msg[] = {
-        SYSEX_START_BYTE, SYSEX_MANUFACTURER_ID_1, SYSEX_MANUFACTURER_ID_2, SYSEX_DEVICE_ID, SYSEX_CMD_CONFIG_RESPONSE,
-        switch_num, event_type, config->msg_type, config->channel,
-        config->param1, config->param2, SYSEX_END_BYTE
-    };
-    
-    uint32_t written = tud_midi_stream_write(MIDI_CABLE_NUM, sysex_msg, sizeof(sysex_msg));
-    printf("Response sent: %d bytes\\n", written);
-    return written == sizeof(sysex_msg);
-}
-
-void send_all_config(void) {
-    printf("Sending all config\n");
-    
-    send_config_response(0, SWITCH_EVENT_PRESS, &current_config.switch1_press);
-    send_config_response(0, SWITCH_EVENT_RELEASE, &current_config.switch1_release);
-    send_config_response(1, SWITCH_EVENT_PRESS, &current_config.switch2_press);
-    send_config_response(1, SWITCH_EVENT_RELEASE, &current_config.switch2_release);
-}
 
 void init_default_config(void) {
     current_config.magic = CONFIG_MAGIC;
+    current_config.num_switches = num_switches;
     
-    current_config.switch1_press = (midi_config_t){MIDI_MSG_CC, 0, 64, 127};
-    current_config.switch1_release = (midi_config_t){MIDI_MSG_CC, 0, 64, 0};
-    current_config.switch2_press = (midi_config_t){MIDI_MSG_PC, 0, 1, 0};
-    current_config.switch2_release = (midi_config_t){MIDI_MSG_PC, 0, 0, 0};
+    // すべてのイベントをクリア
+    memset(current_config.events, 0, sizeof(current_config.events));
+    
+    // デフォルト設定：全ボタンにCC連番を設定
+    uint8_t cc_number = 0;  // CC番号の開始値
+    
+    for (uint8_t i = 0; i < num_switches && i < MAX_SWITCHES; i++) {
+        // Press イベント（CC値127）
+        uint8_t press_idx = i * 2 + 0;
+        current_config.events[press_idx].message_count = 1;
+        midi_config_t* press_msg = &current_config.events[press_idx].messages[0];
+        press_msg->msg_type = MIDI_MSG_CC;
+        press_msg->channel = 0;
+        press_msg->param1 = cc_number;  // CC番号
+        press_msg->param2 = 127;        // Press時は127
+        
+        // Release イベント（CC値0）
+        uint8_t release_idx = i * 2 + 1;
+        current_config.events[release_idx].message_count = 1;
+        midi_config_t* release_msg = &current_config.events[release_idx].messages[0];
+        release_msg->msg_type = MIDI_MSG_CC;
+        release_msg->channel = 0;
+        release_msg->param1 = cc_number;  // 同じCC番号
+        release_msg->param2 = 0;          // Release時は0
+        
+        cc_number++;  // 次のボタンは次のCC番号
+        if (cc_number > 127) cc_number = 0;  // CC番号は0-127の範囲
+    }
     
     current_config.checksum = 0;
 }
@@ -244,6 +265,51 @@ void send_midi_message(const midi_config_t* config) {
     }
 }
 
+void send_midi_messages(const event_config_t* event) {
+    if (!tud_midi_mounted() || !event) return;
+    
+    // 設定されているすべてのメッセージを連続送信
+    for (uint8_t i = 0; i < event->message_count; i++) {
+        const midi_config_t* msg = &event->messages[i];
+        
+        if (msg->msg_type == MIDI_MSG_NONE) continue;
+        
+        uint8_t packet[4] = {0};
+        
+        switch (msg->msg_type) {
+            case MIDI_MSG_CC:
+                packet[0] = MIDI_CABLE_NUM << 4 | 0x0B;
+                packet[1] = 0xB0 | msg->channel;
+                packet[2] = msg->param1;
+                packet[3] = msg->param2;
+                break;
+                
+            case MIDI_MSG_PC:
+                packet[0] = MIDI_CABLE_NUM << 4 | 0x0C;
+                packet[1] = 0xC0 | msg->channel;
+                packet[2] = msg->param1;
+                packet[3] = 0;
+                break;
+                
+            case MIDI_MSG_NOTE:
+                if (msg->param2 > 0) {
+                    packet[0] = MIDI_CABLE_NUM << 4 | 0x09;  // Note On
+                    packet[1] = 0x90 | msg->channel;
+                } else {
+                    packet[0] = MIDI_CABLE_NUM << 4 | 0x08;  // Note Off
+                    packet[1] = 0x80 | msg->channel;
+                }
+                packet[2] = msg->param1;
+                packet[3] = msg->param2;
+                break;
+        }
+        
+        tud_midi_stream_write(MIDI_CABLE_NUM, packet, 4);
+    }
+    
+    start_led_blink();  // LED点滅開始
+}
+
 void start_led_blink(void) {
     led_blink_active = true;
     led_blink_remaining = LED_BLINK_COUNT * 2; // ON/OFFで2回カウント
@@ -274,101 +340,163 @@ void update_led_state(void) {
 void check_switches(void) {
     uint32_t now = board_millis();
     
-    bool tip_pressed = !gpio_get(TIP_PIN);
-    bool ring_pressed = !gpio_get(RING_PIN);
-    
-    if (tip_pressed != switch1_state && is_debounce_elapsed(switch1_debounce_time, now)) {
-        switch1_state = tip_pressed;
-        switch1_debounce_time = now;
+    for (uint8_t i = 0; i < num_switches; i++) {
+        bool pressed = !gpio_get(switch_pins[i]);
         
-        if (switch1_state) {
-            send_midi_message(&current_config.switch1_press);
-        } else {
-            send_midi_message(&current_config.switch1_release);
-        }
-    }
-    
-    if (ring_pressed != switch2_state && is_debounce_elapsed(switch2_debounce_time, now)) {
-        switch2_state = ring_pressed;
-        switch2_debounce_time = now;
-        
-        if (switch2_state) {
-            send_midi_message(&current_config.switch2_press);
-        } else {
-            send_midi_message(&current_config.switch2_release);
+        if (pressed != switch_states[i].state && 
+            is_debounce_elapsed(switch_states[i].debounce_time, now)) {
+            
+            switch_states[i].state = pressed;
+            switch_states[i].debounce_time = now;
+            
+            // イベント設定のインデックス計算
+            uint8_t event_idx = i * 2 + (pressed ? 0 : 1);
+            send_midi_messages(&current_config.events[event_idx]);
         }
     }
 }
 
+void send_info_response(void) {
+    uint8_t response[] = {
+        SYSEX_START_BYTE, SYSEX_MANUFACTURER_ID_1, SYSEX_MANUFACTURER_ID_2, SYSEX_DEVICE_ID,
+        SYSEX_CMD_GET_INFO,
+        num_switches,  // スイッチ数
+        0x01,          // バージョン（1.0）
+        SYSEX_END_BYTE
+    };
+    tud_midi_stream_write(MIDI_CABLE_NUM, response, sizeof(response));
+}
+
+void send_message_response(uint8_t switch_num, uint8_t event_type) {
+    if (switch_num >= num_switches || event_type > 1) return;
+    
+    uint8_t event_idx = switch_num * 2 + event_type;
+    event_config_t* event = &current_config.events[event_idx];
+    
+    // 応答バッファ（最大サイズ）
+    uint8_t response[64];
+    uint8_t pos = 0;
+    
+    response[pos++] = SYSEX_START_BYTE;
+    response[pos++] = SYSEX_MANUFACTURER_ID_1;
+    response[pos++] = SYSEX_MANUFACTURER_ID_2; 
+    response[pos++] = SYSEX_DEVICE_ID;
+    response[pos++] = SYSEX_CMD_GET_MESSAGE;
+    response[pos++] = switch_num;
+    response[pos++] = event_type;
+    response[pos++] = event->message_count;
+    
+    // 各メッセージのデータを追加
+    for (uint8_t i = 0; i < event->message_count && pos < 60; i++) {
+        midi_config_t* msg = &event->messages[i];
+        response[pos++] = msg->msg_type;
+        response[pos++] = msg->channel;
+        response[pos++] = msg->param1;
+        response[pos++] = msg->param2;
+    }
+    
+    response[pos++] = SYSEX_END_BYTE;
+    tud_midi_stream_write(MIDI_CABLE_NUM, response, pos);
+}
+
+void send_success_response(void) {
+    uint8_t response[] = {
+        SYSEX_START_BYTE, SYSEX_MANUFACTURER_ID_1, SYSEX_MANUFACTURER_ID_2, SYSEX_DEVICE_ID,
+        SYSEX_CMD_SET_MESSAGE,
+        0x00,  // 成功
+        SYSEX_END_BYTE
+    };
+    tud_midi_stream_write(MIDI_CABLE_NUM, response, sizeof(response));
+}
+
+void send_error_response(void) {
+    uint8_t response[] = {
+        SYSEX_START_BYTE, SYSEX_MANUFACTURER_ID_1, SYSEX_MANUFACTURER_ID_2, SYSEX_DEVICE_ID,
+        SYSEX_CMD_SET_MESSAGE,
+        0x01,  // エラー
+        SYSEX_END_BYTE
+    };
+    tud_midi_stream_write(MIDI_CABLE_NUM, response, sizeof(response));
+}
+
 void process_sysex_data(const uint8_t* data, uint16_t length) {
     printf("Process SysEx: len=%d\n", length);
-    // Basic validation
+    
+    // 基本バリデーション
     if (length < SYSEX_BASIC_MIN_LENGTH || data[0] != SYSEX_START_BYTE || data[length-1] != SYSEX_END_BYTE) {
         printf("Invalid SysEx\n");
         return;
     }
     
-    // Check manufacturer ID and device type
+    // メーカーIDとデバイスIDをチェック
     if (data[1] != SYSEX_MANUFACTURER_ID_1 || data[2] != SYSEX_MANUFACTURER_ID_2 || data[3] != SYSEX_DEVICE_ID) {
         return;
     }
     
     uint8_t command = data[4];
     
-    // Handle commands
-    if (command == SYSEX_CMD_GET_CONFIG) {
-        printf("GET_CONFIG command\n");
-        if (length == SYSEX_BASIC_MIN_LENGTH) {
-            send_all_config();
+    switch (command) {
+        case SYSEX_CMD_GET_INFO: {
+            if (length == SYSEX_BASIC_MIN_LENGTH) {
+                send_info_response();
+            }
+            break;
         }
-        return;
-    } else if (command != SYSEX_CMD_SET_CONFIG) {
-        return;
-    }
-    
-    // Set config command validation
-    if (length < 11) return;
-    
-    uint8_t switch_num = data[5];
-    uint8_t event_type = data[6];
-    uint8_t msg_type = data[7];
-    uint8_t channel = data[8] & 0x0F;
-    uint8_t param1 = data[9] & 0x7F;
-    uint8_t param2 = (length > 10) ? (data[10] & 0x7F) : 0;
-    
-    // Range validation
-    if (switch_num > 1 || event_type > 1) {
-        return;
-    }
-    
-    // Create temporary config for validation
-    midi_config_t temp_config = {
-        .msg_type = msg_type,
-        .channel = channel,
-        .param1 = param1,
-        .param2 = param2
-    };
-    
-    if (!validate_midi_config(&temp_config)) {
-        return;
-    }
-    
-    // Find target configuration
-    midi_config_t* target_config = NULL;
-    
-    if (switch_num == 0 && event_type == SWITCH_EVENT_PRESS) {
-        target_config = &current_config.switch1_press;
-    } else if (switch_num == 0 && event_type == SWITCH_EVENT_RELEASE) {
-        target_config = &current_config.switch1_release;
-    } else if (switch_num == 1 && event_type == SWITCH_EVENT_PRESS) {
-        target_config = &current_config.switch2_press;
-    } else if (switch_num == 1 && event_type == SWITCH_EVENT_RELEASE) {
-        target_config = &current_config.switch2_release;
-    }
-    
-    if (target_config) {
-        *target_config = temp_config;
-        save_config_to_flash();
+        
+        case SYSEX_CMD_GET_MESSAGE: {
+            if (length == 8) {  // F0 00 7D 01 02 <switch> <event> F7
+                uint8_t switch_num = data[5];
+                uint8_t event_type = data[6];
+                send_message_response(switch_num, event_type);
+            }
+            break;
+        }
+        
+        case SYSEX_CMD_SET_MESSAGE: {
+            if (length >= 9) {  // 最低でもヘッダ+スイッチ+イベント+メッセージ数
+                uint8_t switch_num = data[5];
+                uint8_t event_type = data[6];
+                uint8_t message_count = data[7];
+                
+                // バリデーション
+                if (switch_num >= num_switches || event_type > 1 || 
+                    message_count > MAX_MESSAGES_PER_EVENT || 
+                    length < 8 + message_count * 4) {
+                    send_error_response();
+                    return;
+                }
+                
+                uint8_t event_idx = switch_num * 2 + event_type;
+                event_config_t* event = &current_config.events[event_idx];
+                
+                // メッセージをクリア
+                event->message_count = 0;
+                memset(event->messages, 0, sizeof(event->messages));
+                
+                // 新しいメッセージを設定
+                uint8_t pos = 8;
+                for (uint8_t i = 0; i < message_count && pos + 3 < length; i++) {
+                    midi_config_t* msg = &event->messages[i];
+                    msg->msg_type = data[pos++];
+                    msg->channel = data[pos++] & 0x0F;
+                    msg->param1 = data[pos++] & 0x7F;
+                    msg->param2 = data[pos++] & 0x7F;
+                    
+                    if (validate_midi_config(msg)) {
+                        event->message_count++;
+                    } else {
+                        send_error_response();
+                        return;
+                    }
+                }
+                
+                save_config_to_flash();
+                send_success_response();
+            } else {
+                send_error_response();
+            }
+            break;
+        }
     }
 }
 
@@ -419,13 +547,16 @@ int main(void) {
     board_init();
     
     printf("TinyUSB MIDI Startup\n");
-    gpio_init(TIP_PIN);
-    gpio_set_dir(TIP_PIN, GPIO_IN);
-    gpio_pull_up(TIP_PIN);
     
-    gpio_init(RING_PIN);
-    gpio_set_dir(RING_PIN, GPIO_IN);
-    gpio_pull_up(RING_PIN);
+    // 配列内の各ピンを初期化
+    for (uint8_t i = 0; i < num_switches; i++) {
+        gpio_init(switch_pins[i]);
+        gpio_set_dir(switch_pins[i], GPIO_IN);
+        gpio_pull_up(switch_pins[i]);
+        
+        switch_states[i].state = false;
+        switch_states[i].debounce_time = 0;
+    }
     
     init_default_config();
     if (!load_config_from_flash()) {

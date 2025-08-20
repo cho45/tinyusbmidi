@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TinyUSB MIDI Footswitch Configurator</title>
+    <title>TinyUSB MIDI Footswitch Configurator (Multi-Switch/Multi-Message)</title>
     <link rel="stylesheet" href="style.css">
     <script type="importmap">
     {
@@ -23,7 +23,7 @@
                         <span class="status-dot"></span>
                         <span class="status-text">{{ connectionStatusText }}</span>
                     </span>
-                    <button v-if="isConnected" @click="handleConnect" class="btn btn-small btn-danger">
+                    <button v-if="isConnected" @click="disconnectDevice" class="btn btn-small btn-danger">
                         Disconnect
                     </button>
                 </div>
@@ -40,144 +40,176 @@
                                 {{ device.name }}{{ device.manufacturer ? ` (${device.manufacturer})` : '' }}
                             </option>
                         </select>
-                        <button @click="handleConnect" class="btn btn-primary">
-                            {{ isConnected ? 'Disconnect' : 'Connect' }}
+                        <button @click="connectToDevice" :disabled="!selectedDeviceId" class="btn btn-primary">
+                            Connect
                         </button>
-                        <button @click="refreshDevices" class="btn btn-secondary">Refresh</button>
                     </div>
                 </section>
 
                 <!-- Configuration Section -->
-                <section class="card config-section" v-show="readConfiguration">
-                    <h2>Switch Configuration</h2>
-                    
-                    <!-- Switch 1 Group -->
-                    <div class="switch-group">
-                        <h3 class="switch-group-title">⬤ Switch 1</h3>
+                <section class="card config-section" v-show="isConnected && deviceInfo">
+                    <div class="config-header">
+                        <h2>Switch Configuration</h2>
+                        <div v-if="isLoading" class="loading-indicator">
+                            <div class="loading"></div>
+                            <span>Loading configurations from device...</span>
+                        </div>
+                        <div class="config-actions">
+                            <button @click="loadAllConfigurations" :disabled="isLoading || !isConnected" class="btn btn-secondary btn-small">
+                                Reload All
+                            </button>
+                            <button @click="saveAllConfigurations" :disabled="isLoading || !isConnected || !hasChanges" class="btn btn-primary btn-small">
+                                Save All Changes
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Dynamic Switch Groups -->
+                    <div v-for="(switchConfig, switchIdx) in switchConfigurations" :key="switchIdx" :class="['switch-group', { 'modified': isSwitchChanged(switchIdx), 'loading': isLoading }]">
+                        <h3 class="switch-group-title">
+                            ⬤ Switch {{ switchIdx + 1 }}
+                            <span v-if="isSwitchChanged(switchIdx)" class="change-indicator" style="display: inline;">●</span>
+                        </h3>
+                        
                         <div class="switch-config-row">
-                            <div class="config-item" :class="{ modified: hasConfigChanged('sw1Press') }">
-                                <h4>↓ Press <span class="change-indicator" :style="{ display: hasConfigChanged('sw1Press') ? 'inline' : 'none' }">*</span></h4>
-                                <div class="config-form">
-                                    <div class="form-row">
-                                        <label>Type:</label>
-                                        <select v-model="configurations.sw1Press.msgType" class="msg-type-select">
-                                            <option value="None">None</option>
-                                            <option value="CC">CC</option>
-                                            <option value="PC">PC</option>
-                                            <option value="Note">Note</option>
-                                        </select>
+                            <!-- Press Event -->
+                            <div :class="['event-config', { 'modified': isEventChanged(switchIdx, 'press') }]">
+                                <div class="event-header">
+                                    <h4>↓ Press</h4>
+                                    <div class="event-actions">
+                                        <button @click="addMessage(switchIdx, 'press')" 
+                                                :disabled="isLoading || switchConfig.press.messages.length >= 10"
+                                                class="btn btn-small btn-secondary">
+                                            + Add Message
+                                        </button>
+                                        <button @click="saveConfiguration(switchIdx, 'press')" 
+                                                :class="['btn', 'btn-small', isEventChanged(switchIdx, 'press') ? 'btn-warning' : 'btn-primary']"
+                                                :disabled="isLoading || !isConnected || !isEventChanged(switchIdx, 'press')">
+                                            {{ isEventChanged(switchIdx, 'press') ? 'Save Press •' : 'Save Press' }}
+                                        </button>
                                     </div>
-                                    <div class="form-row">
-                                        <label>Channel:</label>
-                                        <input type="number" v-model.number="configurations.sw1Press.channel" min="1" max="16" class="number-input">
-                                    </div>
-                                    <div class="form-row" v-show="configurations.sw1Press.msgType !== 'None'">
-                                        <label>{{ getParam1Label(configurations.sw1Press.msgType) }}:</label>
-                                        <input type="number" v-model.number="configurations.sw1Press.param1" min="0" max="127" class="number-input">
-                                    </div>
-                                    <div class="form-row" v-show="configurations.sw1Press.msgType === 'CC' || configurations.sw1Press.msgType === 'Note'">
-                                        <label>{{ getParam2Label(configurations.sw1Press.msgType) }}:</label>
-                                        <input type="number" v-model.number="configurations.sw1Press.param2" min="0" max="127" class="number-input">
+                                </div>
+                                
+                                <div class="messages-list">
+                                    <div v-for="(message, messageIdx) in switchConfig.press.messages" 
+                                         :key="messageIdx" 
+                                         class="message-config">
+                                        <div class="message-header">
+                                            <span class="message-number">{{ messageIdx + 1 }}</span>
+                                            <span class="message-preview">{{ formatMessage(message) }}</span>
+                                            <button v-if="switchConfig.press.messages.length > 1"
+                                                    @click="removeMessage(switchIdx, 'press', messageIdx)"
+                                                    :disabled="isLoading"
+                                                    class="btn btn-tiny btn-danger">
+                                                ×
+                                            </button>
+                                        </div>
+                                        
+                                        <div class="message-form">
+                                            <div class="form-row">
+                                                <label>Type:</label>
+                                                <select v-model.number="message.msgType" :disabled="isLoading" class="msg-type-select">
+                                                    <option :value="0">None</option>
+                                                    <option :value="1">CC</option>
+                                                    <option :value="2">PC</option>
+                                                    <option :value="3">Note</option>
+                                                </select>
+                                            </div>
+                                            <div class="form-row" v-show="message.msgType > 0">
+                                                <label>Channel:</label>
+                                                <input type="number" v-model.number="message.channel" min="0" max="15" :disabled="isLoading" class="number-input small">
+                                                <small>(0-15)</small>
+                                            </div>
+                                            <div class="form-row" v-show="message.msgType > 0">
+                                                <label v-if="message.msgType === 1">CC Number:</label>
+                                                <label v-else-if="message.msgType === 2">Program:</label>
+                                                <label v-else-if="message.msgType === 3">Note:</label>
+                                                <input type="number" v-model.number="message.param1" min="0" max="127" :disabled="isLoading" class="number-input small">
+                                            </div>
+                                            <div class="form-row" v-show="message.msgType === 1 || message.msgType === 3">
+                                                <label v-if="message.msgType === 1">CC Value:</label>
+                                                <label v-else-if="message.msgType === 3">Velocity:</label>
+                                                <input type="number" v-model.number="message.param2" min="0" max="127" :disabled="isLoading" class="number-input small">
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
 
-                            <div class="config-item" :class="{ modified: hasConfigChanged('sw1Release') }">
-                                <h4>↑ Release <span class="change-indicator" :style="{ display: hasConfigChanged('sw1Release') ? 'inline' : 'none' }">*</span></h4>
-                                <div class="config-form">
-                                    <div class="form-row">
-                                        <label>Type:</label>
-                                        <select v-model="configurations.sw1Release.msgType" class="msg-type-select">
-                                            <option value="None">None</option>
-                                            <option value="CC">CC</option>
-                                            <option value="PC">PC</option>
-                                            <option value="Note">Note</option>
-                                        </select>
+                            <!-- Release Event -->
+                            <div :class="['event-config', { 'modified': isEventChanged(switchIdx, 'release') }]">
+                                <div class="event-header">
+                                    <h4>↑ Release</h4>
+                                    <div class="event-actions">
+                                        <button @click="addMessage(switchIdx, 'release')" 
+                                                :disabled="isLoading || switchConfig.release.messages.length >= 10"
+                                                class="btn btn-small btn-secondary">
+                                            + Add Message
+                                        </button>
+                                        <button @click="saveConfiguration(switchIdx, 'release')" 
+                                                :class="['btn', 'btn-small', isEventChanged(switchIdx, 'release') ? 'btn-warning' : 'btn-primary']"
+                                                :disabled="isLoading || !isConnected || !isEventChanged(switchIdx, 'release')">
+                                            {{ isEventChanged(switchIdx, 'release') ? 'Save Release •' : 'Save Release' }}
+                                        </button>
                                     </div>
-                                    <div class="form-row">
-                                        <label>Channel:</label>
-                                        <input type="number" v-model.number="configurations.sw1Release.channel" min="1" max="16" class="number-input">
-                                    </div>
-                                    <div class="form-row" v-show="configurations.sw1Release.msgType !== 'None'">
-                                        <label>{{ getParam1Label(configurations.sw1Release.msgType) }}:</label>
-                                        <input type="number" v-model.number="configurations.sw1Release.param1" min="0" max="127" class="number-input">
-                                    </div>
-                                    <div class="form-row" v-show="configurations.sw1Release.msgType === 'CC' || configurations.sw1Release.msgType === 'Note'">
-                                        <label>{{ getParam2Label(configurations.sw1Release.msgType) }}:</label>
-                                        <input type="number" v-model.number="configurations.sw1Release.param2" min="0" max="127" class="number-input">
+                                </div>
+                                
+                                <div class="messages-list">
+                                    <div v-for="(message, messageIdx) in switchConfig.release.messages" 
+                                         :key="messageIdx" 
+                                         class="message-config">
+                                        <div class="message-header">
+                                            <span class="message-number">{{ messageIdx + 1 }}</span>
+                                            <span class="message-preview">{{ formatMessage(message) }}</span>
+                                            <button v-if="switchConfig.release.messages.length > 1"
+                                                    @click="removeMessage(switchIdx, 'release', messageIdx)"
+                                                    :disabled="isLoading"
+                                                    class="btn btn-tiny btn-danger">
+                                                ×
+                                            </button>
+                                        </div>
+                                        
+                                        <div class="message-form">
+                                            <div class="form-row">
+                                                <label>Type:</label>
+                                                <select v-model.number="message.msgType" :disabled="isLoading" class="msg-type-select">
+                                                    <option :value="0">None</option>
+                                                    <option :value="1">CC</option>
+                                                    <option :value="2">PC</option>
+                                                    <option :value="3">Note</option>
+                                                </select>
+                                            </div>
+                                            <div class="form-row" v-show="message.msgType > 0">
+                                                <label>Channel:</label>
+                                                <input type="number" v-model.number="message.channel" min="0" max="15" :disabled="isLoading" class="number-input small">
+                                                <small>(0-15)</small>
+                                            </div>
+                                            <div class="form-row" v-show="message.msgType > 0">
+                                                <label v-if="message.msgType === 1">CC Number:</label>
+                                                <label v-else-if="message.msgType === 2">Program:</label>
+                                                <label v-else-if="message.msgType === 3">Note:</label>
+                                                <input type="number" v-model.number="message.param1" min="0" max="127" :disabled="isLoading" class="number-input small">
+                                            </div>
+                                            <div class="form-row" v-show="message.msgType === 1 || message.msgType === 3">
+                                                <label v-if="message.msgType === 1">CC Value:</label>
+                                                <label v-else-if="message.msgType === 3">Velocity:</label>
+                                                <input type="number" v-model.number="message.param2" min="0" max="127" :disabled="isLoading" class="number-input small">
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Switch 2 Group -->
-                    <div class="switch-group">
-                        <h3 class="switch-group-title">⬤ Switch 2</h3>
-                        <div class="switch-config-row">
-                            <div class="config-item" :class="{ modified: hasConfigChanged('sw2Press') }">
-                                <h4>↓ Press <span class="change-indicator" :style="{ display: hasConfigChanged('sw2Press') ? 'inline' : 'none' }">*</span></h4>
-                                <div class="config-form">
-                                    <div class="form-row">
-                                        <label>Type:</label>
-                                        <select v-model="configurations.sw2Press.msgType" class="msg-type-select">
-                                            <option value="None">None</option>
-                                            <option value="CC">CC</option>
-                                            <option value="PC">PC</option>
-                                            <option value="Note">Note</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-row">
-                                        <label>Channel:</label>
-                                        <input type="number" v-model.number="configurations.sw2Press.channel" min="1" max="16" class="number-input">
-                                    </div>
-                                    <div class="form-row" v-show="configurations.sw2Press.msgType !== 'None'">
-                                        <label>{{ getParam1Label(configurations.sw2Press.msgType) }}:</label>
-                                        <input type="number" v-model.number="configurations.sw2Press.param1" min="0" max="127" class="number-input">
-                                    </div>
-                                    <div class="form-row" v-show="configurations.sw2Press.msgType === 'CC' || configurations.sw2Press.msgType === 'Note'">
-                                        <label>{{ getParam2Label(configurations.sw2Press.msgType) }}:</label>
-                                        <input type="number" v-model.number="configurations.sw2Press.param2" min="0" max="127" class="number-input">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="config-item" :class="{ modified: hasConfigChanged('sw2Release') }">
-                                <h4>↑ Release <span class="change-indicator" :style="{ display: hasConfigChanged('sw2Release') ? 'inline' : 'none' }">*</span></h4>
-                                <div class="config-form">
-                                    <div class="form-row">
-                                        <label>Type:</label>
-                                        <select v-model="configurations.sw2Release.msgType" class="msg-type-select">
-                                            <option value="None">None</option>
-                                            <option value="CC">CC</option>
-                                            <option value="PC">PC</option>
-                                            <option value="Note">Note</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-row">
-                                        <label>Channel:</label>
-                                        <input type="number" v-model.number="configurations.sw2Release.channel" min="1" max="16" class="number-input">
-                                    </div>
-                                    <div class="form-row" v-show="configurations.sw2Release.msgType !== 'None'">
-                                        <label>{{ getParam1Label(configurations.sw2Release.msgType) }}:</label>
-                                        <input type="number" v-model.number="configurations.sw2Release.param1" min="0" max="127" class="number-input">
-                                    </div>
-                                    <div class="form-row" v-show="configurations.sw2Release.msgType === 'CC' || configurations.sw2Release.msgType === 'Note'">
-                                        <label>{{ getParam2Label(configurations.sw2Release.msgType) }}:</label>
-                                        <input type="number" v-model.number="configurations.sw2Release.param2" min="0" max="127" class="number-input">
-                                    </div>
-                                </div>
-                            </div>
+                    <!-- Global Action Buttons -->
+                    <div class="global-actions">
+                        <div class="action-group">
+                            <h4>File Operations</h4>
+                            <button @click="saveToFile" :disabled="isLoading" class="btn btn-secondary">Save to File</button>
+                            <button @click="$refs.fileInput.click()" :disabled="isLoading" class="btn btn-secondary">Load from File</button>
+                            <input ref="fileInput" type="file" accept=".json" style="display: none;" @change="loadFromFile">
                         </div>
-                    </div>
-
-                    <!-- Action Buttons -->
-                    <div class="action-buttons">
-                        <button @click="writeToDevice" :disabled="!isConnected || !hasChanges" class="btn btn-primary">Write to Device</button>
-                        <div class="separator"></div>
-                        <button @click="saveToFile" class="btn btn-secondary">Save to File</button>
-                        <button @click="loadFromFile" class="btn btn-secondary">Load from File</button>
-                        <input ref="fileInput" type="file" accept=".json" style="display: none;" @change="handleFileLoad">
                     </div>
                 </section>
 
@@ -185,7 +217,7 @@
                 <section class="card log-section">
                     <div class="log-header">
                         <h2>Communication Log</h2>
-                        <button @click="clearLog" class="btn btn-small">Clear</button>
+                        <button @click="logEntries = []" class="btn btn-small">Clear</button>
                     </div>
                     <div class="log-container">
                         <div class="log-content" ref="logContent">
@@ -204,6 +236,9 @@
 
             <footer>
                 <p>WebMIDI API Status: <span>{{ webMidiStatus }}</span></p>
+                <p v-if="deviceInfo">
+                    Device: {{ deviceInfo.numSwitches }} switches, Version {{ deviceInfo.version }}
+                </p>
             </footer>
         </div>
     </div>

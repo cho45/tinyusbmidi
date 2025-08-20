@@ -1,10 +1,12 @@
 /**
  * MIDI Manager - WebMIDI API wrapper and SysEx protocol implementation
- * Handles all MIDI device communication for TinyUSB MIDI Footswitch
+ * Handles all MIDI device communication for TinyUSB MIDI Footswitch (Multi-Switch/Multi-Message Version)
  */
 
-// SysEx Protocol Constants
-const SYSEX_CONFIG_RESPONSE_LENGTH = 12;
+// 新しいSysEx Protocol Constants
+const SYSEX_CMD_GET_INFO = 0x01;      // スイッチ数やバージョンを返す
+const SYSEX_CMD_GET_MESSAGE = 0x02;   // 特定のスイッチの設定を取得
+const SYSEX_CMD_SET_MESSAGE = 0x03;   // 特定のスイッチの設定をセット
 
 class MidiManager extends EventTarget {
   constructor() {
@@ -15,11 +17,12 @@ class MidiManager extends EventTarget {
     this.isConnected = false;
     this.responseTimeout = 2000; // 2 seconds timeout for responses
     this.pendingResponses = new Map();
+    this.deviceInfo = null; // {numSwitches, version}
   }
 
   /**
-     * Initialize WebMIDI API
-     */
+   * Initialize WebMIDI API
+   */
   async initialize() {
     try {
       if (!navigator.requestMIDIAccess) {
@@ -44,65 +47,87 @@ class MidiManager extends EventTarget {
   }
 
   /**
-     * Get list of available MIDI devices
-     */
+   * Get list of available MIDI devices
+   */
   getAvailableDevices() {
     const devices = [];
-    if (!this.midiAccess) return devices;
-
-    // Get input devices
-    for (const input of this.midiAccess.inputs.values()) {
-      const output = Array.from(this.midiAccess.outputs.values())
-        .find(out => out.name === input.name);
-            
-      if (output) {
-        devices.push({
-          id: input.id,
-          name: input.name,
-          manufacturer: input.manufacturer,
-          input: input,
-          output: output
-        });
+    
+    if (this.midiAccess) {
+      for (let input of this.midiAccess.inputs.values()) {
+        if (input.state === 'connected') {
+          devices.push({
+            id: input.id,
+            name: input.name,
+            manufacturer: input.manufacturer,
+            type: 'input'
+          });
+        }
       }
     }
-
+    
     return devices;
   }
 
   /**
-     * Connect to a MIDI device
-     */
-  async connectDevice(deviceId) {
+   * Refresh device list and notify listeners
+   */
+  refreshDeviceList() {
+    const devices = this.getAvailableDevices();
+    this.dispatchEvent(new CustomEvent('devicesChanged', { 
+      detail: { devices }
+    }));
+  }
+
+  /**
+   * Handle MIDI state changes
+   */
+  handleStateChange(event) {
+    this.refreshDeviceList();
+    
+    if (event.port.state === 'disconnected' && 
+        (event.port === this.currentInput || event.port === this.currentOutput)) {
+      this.disconnect();
+    }
+  }
+
+  /**
+   * Connect to a specific device by ID
+   */
+  async connectToDevice(deviceId) {
     try {
-      const devices = this.getAvailableDevices();
-      const device = devices.find(d => d.id === deviceId);
-            
-      if (!device) {
-        throw new Error('Device not found');
-      }
-
-      // 既に同じデバイスに接続されている場合はスキップ
-      if (this.isConnected && this.currentInput && this.currentInput.id === deviceId) {
-        return true;
-      }
+      const input = this.midiAccess.inputs.get(deviceId);
       
-      // Disconnect current device if any
-      if (this.isConnected) {
-        this.disconnect();
+      if (!input) {
+        throw new Error('Input device not found');
       }
 
-      this.currentInput = device.input;
-      this.currentOutput = device.output;
+      // 同じ名前の出力デバイスを探す
+      let output = null;
+      for (let out of this.midiAccess.outputs.values()) {
+        if (out.name === input.name && out.state === 'connected') {
+          output = out;
+          break;
+        }
+      }
 
-      // Set up message handler
+      if (!output) {
+        throw new Error('Corresponding output device not found');
+      }
+
+      this.currentInput = input;
+      this.currentOutput = output;
+      
       this.currentInput.onmidimessage = (event) => {
         this.handleMidiMessage(event);
       };
 
       this.isConnected = true;
             
+      // デバイス情報を取得
+      this.deviceInfo = await this.getDeviceInfo();
+      
       this.dispatchEvent(new CustomEvent('connected', { 
-        detail: { device: device.name }
+        detail: { device: input.name, deviceInfo: this.deviceInfo }
       }));
 
       return true;
@@ -115,8 +140,8 @@ class MidiManager extends EventTarget {
   }
 
   /**
-     * Disconnect from current device
-     */
+   * Disconnect from current device
+   */
   disconnect() {
     if (this.currentInput) {
       this.currentInput.onmidimessage = null;
@@ -128,115 +153,164 @@ class MidiManager extends EventTarget {
     }
 
     this.isConnected = false;
+    this.deviceInfo = null;
     this.pendingResponses.clear();
         
     this.dispatchEvent(new CustomEvent('disconnected'));
   }
 
   /**
-     * Send a configuration to the device
-     * @param {number} switchNum - 0 for Switch1, 1 for Switch2
-     * @param {number} eventType - 0 for Press, 1 for Release
-     * @param {Object} config - Configuration object with msgType, channel, param1, param2
-     */
-  async sendConfiguration(switchNum, eventType, config) {
+   * デバイス情報を取得
+   */
+  async getDeviceInfo() {
     if (!this.isConnected || !this.currentOutput) {
       throw new Error('No device connected');
     }
 
     const sysexData = [
-      0xF0, // SysEx start
-      0x00, 0x7D, // Manufacturer ID (non-commercial)
-      0x01, // Device ID
-      0x01, // Command: Set Config
-      switchNum & 0x7F,
-      eventType & 0x7F,
-      config.msgType & 0x7F,
-      config.channel & 0x7F,
-      config.param1 & 0x7F,
-      config.param2 & 0x7F,
-      0xF7  // SysEx end
+      0xF0, 0x00, 0x7D, 0x01,  // SysEx header
+      SYSEX_CMD_GET_INFO,      // Get Info command
+      0xF7                     // SysEx end
     ];
+
+    const responsePromise = this.createResponsePromise('info');
 
     try {
       this.currentOutput.send(sysexData);
-            
+      
       this.dispatchEvent(new CustomEvent('sysexSent', { 
-        detail: { 
-          message: 'Configuration sent',
-          data: sysexData 
-        }
+        detail: { message: 'Device info request sent', data: sysexData }
       }));
 
-      return true;
+      return await responsePromise;
     } catch (error) {
       this.dispatchEvent(new CustomEvent('error', { 
-        detail: { message: `Failed to send configuration: ${error.message}` }
-      }));
-      return false;
-    }
-  }
-
-  /**
-     * Request current configuration from device
-     */
-  async requestConfiguration() {
-    if (!this.isConnected || !this.currentOutput) {
-      throw new Error('No device connected');
-    }
-
-    const sysexData = [
-      0xF0, // SysEx start
-      0x00, 0x7D, // Manufacturer ID
-      0x01, // Device ID
-      0x02, // Command: Get Config
-      0xF7  // SysEx end
-    ];
-
-    // Create promise for response
-    const responsePromise = new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        this.pendingResponses.delete('config');
-        reject(new Error('Response timeout'));
-      }, this.responseTimeout);
-
-      this.pendingResponses.set('config', {
-        resolve: (data) => {
-          clearTimeout(timeoutId);
-          this.pendingResponses.delete('config');
-          resolve(data);
-        },
-        reject: (error) => {
-          clearTimeout(timeoutId);
-          this.pendingResponses.delete('config');
-          reject(error);
-        }
-      });
-    });
-
-    try {
-      this.currentOutput.send(sysexData);
-            
-      this.dispatchEvent(new CustomEvent('sysexSent', { 
-        detail: { 
-          message: 'Configuration request sent',
-          data: sysexData 
-        }
-      }));
-
-      const configs = await responsePromise;
-      return configs;
-    } catch (error) {
-      this.dispatchEvent(new CustomEvent('error', { 
-        detail: { message: `Failed to request configuration: ${error.message}` }
+        detail: { message: `Failed to get device info: ${error.message}` }
       }));
       throw error;
     }
   }
 
   /**
-     * Handle incoming MIDI messages
-     */
+   * 特定のスイッチ/イベントの設定を取得
+   */
+  async getMessages(switchNum, eventType) {
+    if (!this.isConnected || !this.currentOutput) {
+      throw new Error('No device connected');
+    }
+
+    const sysexData = [
+      0xF0, 0x00, 0x7D, 0x01,      // SysEx header
+      SYSEX_CMD_GET_MESSAGE,       // Get Message command
+      switchNum & 0x7F,            // スイッチ番号
+      eventType & 0x7F,            // イベント種別
+      0xF7                         // SysEx end
+    ];
+
+    const responseKey = `message_${switchNum}_${eventType}`;
+    const responsePromise = this.createResponsePromise(responseKey);
+
+    try {
+      this.currentOutput.send(sysexData);
+      
+      this.dispatchEvent(new CustomEvent('sysexSent', { 
+        detail: { 
+          message: `Message request sent for Switch ${switchNum} Event ${eventType}`,
+          data: sysexData 
+        }
+      }));
+
+      return await responsePromise;
+    } catch (error) {
+      this.dispatchEvent(new CustomEvent('error', { 
+        detail: { message: `Failed to get messages: ${error.message}` }
+      }));
+      throw error;
+    }
+  }
+
+  /**
+   * 特定のスイッチ/イベントに複数のメッセージを設定
+   */
+  async setMessages(switchNum, eventType, messages) {
+    if (!this.isConnected || !this.currentOutput) {
+      throw new Error('No device connected');
+    }
+
+    if (messages.length > 10) {
+      throw new Error('Maximum 10 messages per event');
+    }
+
+    const sysexData = [
+      0xF0, 0x00, 0x7D, 0x01,    // SysEx header
+      SYSEX_CMD_SET_MESSAGE,     // Set Message command
+      switchNum & 0x7F,          // スイッチ番号
+      eventType & 0x7F,          // イベント種別
+      messages.length & 0x7F     // メッセージ数
+    ];
+
+    // 各メッセージのデータを追加
+    for (const msg of messages) {
+      sysexData.push(
+        msg.msgType & 0x7F,
+        msg.channel & 0x7F,
+        msg.param1 & 0x7F,
+        msg.param2 & 0x7F
+      );
+    }
+
+    sysexData.push(0xF7);  // SysEx end
+
+    const responseKey = `set_${switchNum}_${eventType}`;
+    const responsePromise = this.createResponsePromise(responseKey);
+
+    try {
+      this.currentOutput.send(sysexData);
+      
+      this.dispatchEvent(new CustomEvent('sysexSent', { 
+        detail: { 
+          message: `Set messages sent for Switch ${switchNum} Event ${eventType}`,
+          data: sysexData 
+        }
+      }));
+
+      return await responsePromise;
+    } catch (error) {
+      this.dispatchEvent(new CustomEvent('error', { 
+        detail: { message: `Failed to set messages: ${error.message}` }
+      }));
+      throw error;
+    }
+  }
+
+  /**
+   * レスポンス待機Promise作成
+   */
+  createResponsePromise(key) {
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this.pendingResponses.delete(key);
+        reject(new Error('Response timeout'));
+      }, this.responseTimeout);
+
+      this.pendingResponses.set(key, {
+        resolve: (data) => {
+          clearTimeout(timeoutId);
+          this.pendingResponses.delete(key);
+          resolve(data);
+        },
+        reject: (error) => {
+          clearTimeout(timeoutId);
+          this.pendingResponses.delete(key);
+          reject(error);
+        }
+      });
+    });
+  }
+
+  /**
+   * Handle incoming MIDI messages
+   */
   handleMidiMessage(event) {
     const data = event.data;
         
@@ -252,11 +326,11 @@ class MidiManager extends EventTarget {
   }
 
   /**
-     * Handle SysEx messages
-     */
+   * Handle SysEx messages
+   */
   handleSysExMessage(data) {
     // Validate SysEx format
-    if (data.length < 7 || data[data.length - 1] !== 0xF7) {
+    if (data.length < 6 || data[data.length - 1] !== 0xF7) {
       return;
     }
 
@@ -267,112 +341,103 @@ class MidiManager extends EventTarget {
 
     const command = data[4];
         
-    if (command === 0x03) { // Config Response
-      this.handleConfigResponse(data);
+    switch (command) {
+      case SYSEX_CMD_GET_INFO:
+        this.handleInfoResponse(data);
+        break;
+        
+      case SYSEX_CMD_GET_MESSAGE:
+        this.handleMessageResponse(data);
+        break;
+        
+      case SYSEX_CMD_SET_MESSAGE:
+        this.handleSetResponse(data);
+        break;
     }
   }
 
   /**
-     * Handle configuration response from device
-     */
-  handleConfigResponse(data) {
-    if (data.length !== SYSEX_CONFIG_RESPONSE_LENGTH) {
-      this.dispatchEvent(new CustomEvent('error', { 
-        detail: { message: 'Invalid configuration response length' }
-      }));
-      return;
-    }
-
-    const config = {
-      switchNum: data[5],
-      eventType: data[6],
-      msgType: data[7],
-      channel: data[8],
-      param1: data[9],
-      param2: data[10]
+   * デバイス情報レスポンス処理
+   */
+  handleInfoResponse(data) {
+    if (data.length < 8) return;
+    
+    const info = {
+      numSwitches: data[5],
+      version: data[6]
     };
 
-    this.dispatchEvent(new CustomEvent('configReceived', { 
-      detail: config
+    this.dispatchEvent(new CustomEvent('infoReceived', { 
+      detail: info
     }));
 
-    // Store configuration (collecting all 4 configs)
-    if (!this.configBuffer) {
-      this.configBuffer = [];
+    const pending = this.pendingResponses.get('info');
+    if (pending) {
+      pending.resolve(info);
     }
-        
-    this.configBuffer.push(config);
-        
-    // If we have all 4 configurations, resolve the promise
-    if (this.configBuffer.length === 4) {
-      const pending = this.pendingResponses.get('config');
-      if (pending) {
-        pending.resolve(this.configBuffer);
+  }
+
+  /**
+   * メッセージ取得レスポンス処理
+   */
+  handleMessageResponse(data) {
+    if (data.length < 9) return;
+    
+    const switchNum = data[5];
+    const eventType = data[6];
+    const messageCount = data[7];
+    const messages = [];
+
+    let pos = 8;
+    for (let i = 0; i < messageCount && pos + 3 < data.length; i++) {
+      messages.push({
+        msgType: data[pos++],
+        channel: data[pos++],
+        param1: data[pos++],
+        param2: data[pos++]
+      });
+    }
+
+    const result = {
+      switchNum,
+      eventType,
+      messages
+    };
+
+    this.dispatchEvent(new CustomEvent('messagesReceived', { 
+      detail: result
+    }));
+
+    const responseKey = `message_${switchNum}_${eventType}`;
+    const pending = this.pendingResponses.get(responseKey);
+    if (pending) {
+      pending.resolve(result);
+    }
+  }
+
+  /**
+   * 設定完了レスポンス処理
+   */
+  handleSetResponse(data) {
+    if (data.length < 7) return;
+    
+    const success = data[5] === 0x00;
+
+    this.dispatchEvent(new CustomEvent('setComplete', { 
+      detail: { success }
+    }));
+
+    // 全ての待機中のsetリクエストに応答
+    for (const [key, pending] of this.pendingResponses.entries()) {
+      if (key.startsWith('set_')) {
+        if (success) {
+          pending.resolve({ success });
+        } else {
+          pending.reject(new Error('Set operation failed'));
+        }
       }
-      this.configBuffer = [];
-    }
-  }
-
-  /**
-     * Handle device state changes
-     */
-  handleStateChange(event) {
-    const port = event.port;
-    const state = port.state;
-        
-    this.dispatchEvent(new CustomEvent('statechange', { 
-      detail: { 
-        name: port.name,
-        state: state,
-        type: port.type
-      }
-    }));
-
-    // Refresh device list
-    this.refreshDeviceList();
-        
-    // Check if current device was disconnected
-    if (this.currentInput && this.currentInput.id === port.id && state === 'disconnected') {
-      this.disconnect();
-    }
-  }
-
-  /**
-     * Refresh device list and notify listeners
-     */
-  refreshDeviceList() {
-    const devices = this.getAvailableDevices();
-    this.dispatchEvent(new CustomEvent('devicesChanged', { 
-      detail: { devices }
-    }));
-  }
-
-  /**
-     * Convert message type to string
-     */
-  static getMsgTypeString(msgType) {
-    switch (msgType) {
-    case 0: return 'None';
-    case 1: return 'CC';
-    case 2: return 'PC';
-    case 3: return 'Note';
-    default: return 'Unknown';
-    }
-  }
-
-  /**
-     * Convert string to message type
-     */
-  static getMsgTypeValue(msgTypeString) {
-    switch (msgTypeString.toUpperCase()) {
-    case 'NONE': return 0;
-    case 'CC': return 1;
-    case 'PC': return 2;
-    case 'NOTE': return 3;
-    default: return 0;
     }
   }
 }
 
-// ES Module export
 export default MidiManager;
