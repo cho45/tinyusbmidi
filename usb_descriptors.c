@@ -115,7 +115,7 @@ char const* string_desc_arr [] =
 {
   (const char[]) { 0x09, 0x04 }, // 0: is supported language is English (0x0409)
   "Maker",                       // 1: Manufacturer
-  "TinyUSB MIDI Footswitch",     // 2: Product
+  "PicoMIDI Switch",             // 2: Product
   "123456",                      // 3: Serials
 };
 

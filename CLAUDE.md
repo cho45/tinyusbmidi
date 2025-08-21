@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-TinyUSB MIDI Footswitch is a Raspberry Pi Pico (RP2040) firmware that converts multiple GPIO inputs into USB MIDI messages. The project supports up to 16 switches with up to 10 MIDI messages per press/release event. It includes both embedded firmware and a Vue.js 3 WebMIDI configuration tool.
+PicoMIDI Switch is a Raspberry Pi Pico (RP2040) firmware that converts multiple GPIO inputs into USB MIDI messages. The project supports up to 16 switches with up to 10 MIDI messages per press/release event. It includes both embedded firmware and a Vue.js 3 WebMIDI configuration tool.
 
 ## Build Commands
 
@@ -20,22 +20,22 @@ cmake .. -G Ninja
 ninja
 
 # Output files:
-# - tinyusbmidi.uf2 (for drag-and-drop flashing)
-# - tinyusbmidi.elf (for SWD debugging)
+# - picomidi.uf2 (for drag-and-drop flashing)
+# - picomidi.elf (for SWD debugging)
 ```
 
 ### Firmware Flashing
 ```bash
 # Method 1: UF2 drag-and-drop (recommended)
 # 1. Hold BOOTSEL button while connecting Pico to USB
-# 2. Copy build/tinyusbmidi.uf2 to RPI-RP2 drive
+# 2. Copy build/picomidi.uf2 to RPI-RP2 drive
 
 # Method 2: picotool
-picotool load tinyusbmidi.uf2
+picotool load picomidi.uf2
 picotool reboot
 
 # Method 3: SWD debugging (with debug probe)
-openocd -f interface/picoprobe.cfg -f target/rp2040.cfg -c "program tinyusbmidi.elf verify reset exit"
+openocd -f interface/picoprobe.cfg -f target/rp2040.cfg -c "program picomidi.elf verify reset exit"
 ```
 
 ### Configuration Tool
@@ -54,7 +54,7 @@ npm run lint:fix
 ## Architecture Overview
 
 ### Firmware Architecture
-- **tinyusbmidi.c**: Main firmware logic with GPIO handling, MIDI output, SysEx processing
+- **picomidi.c**: Main firmware logic with GPIO handling, MIDI output, SysEx processing
 - **usb_descriptors.c**: USB MIDI device descriptors using TinyUSB macros  
 - **tusb_config.h**: TinyUSB configuration (MIDI device class enabled)
 - **CMakeLists.txt**: Pico SDK build configuration
@@ -62,7 +62,7 @@ npm run lint:fix
 ### Key Hardware Configuration
 - **GPIO Pins**: Array-based configuration via CMake-generated `switch_pins.h` (default: GP2, GP3)
 - **Maximum Switches**: Up to 16 switches supported (configurable at build time)
-- **USB**: Class-compliant MIDI device "TinyUSB MIDI Footswitch"
+- **USB**: Class-compliant MIDI device "PicoMIDI Switch"
 - **Flash Storage**: Configuration saved at 256KB offset for persistence
 - **Memory Usage**: ~1,321 bytes for 16 switches (well within RP2040's 264KB RAM)
 
@@ -97,7 +97,7 @@ Set Messages:    F0 00 7D 01 03 <switch> <event> <count> [<msg_data>...] F7
 - **style.css**: Dark theme with loading states and change indicators
 
 #### Key Features
-- **Auto-connection**: Automatic detection and connection to TinyUSB MIDI Footswitch
+- **Auto-connection**: Automatic detection and connection to PicoMIDI Switch
 - **Multi-switch UI**: Dynamic interface generation based on device switch count
 - **Multi-message Management**: Up to 10 messages per switch event with intuitive UI
 - **Real-time Change Detection**: Visual feedback for unsaved changes with deep object comparison

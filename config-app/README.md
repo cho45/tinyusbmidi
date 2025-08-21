@@ -1,17 +1,17 @@
-# TinyUSB MIDI Footswitch Configurator (Multi-Switch/Multi-Message)
+# PicoMIDI Switch Configurator (Multi-Switch/Multi-Message)
 
-Vue.js 3 + WebMIDI APIを使用したTinyUSB MIDI フットスイッチデバイス設定ツール（複数スイッチ・複数メッセージ対応）
+Vue.js 3 + WebMIDI APIを使用したPicoMIDI Switchデバイス設定ツール（複数スイッチ・複数メッセージ対応）
 
 ## 概要
 
-このWebアプリケーションは、TinyUSB MIDIフットスイッチデバイスの設定をブラウザから行うためのツールです。Vue.js 3 Composition APIによる最新のリアクティブUIと、WebMIDI APIを活用したSysExプロトコル通信により、複数スイッチ・複数メッセージに対応した高度な設定管理を提供します。
+このWebアプリケーションは、PicoMIDI Switchデバイスの設定をブラウザから行うためのツールです。Vue.js 3 Composition APIによる最新のリアクティブUIと、WebMIDI APIを活用したSysExプロトコル通信により、複数スイッチ・複数メッセージに対応した高度な設定管理を提供します。
 
 ## 機能
 
 - **Vue.js 3 Composition API**: 高速でリアクティブなモダンWeb UI
 - **複数スイッチ対応**: 1〜16個のスイッチを動的に検出・設定
 - **複数メッセージ管理**: 各スイッチのPress/Releaseイベント毎に最大10個のMIDIメッセージを設定
-- **デバイス自動検出**: TinyUSB MIDI Footswitchの自動認識・接続
+- **デバイス自動検出**: PicoMIDI Switchの自動認識・接続
 - **リアルタイム変更検出**: 未保存変更のディープ比較による視覚的フィードバック
 - **設定バックアップ**: JSON形式でのローカルファイル保存・復元
 - **ライブコミュニケーションログ**: SysEx通信とエラーのリアルタイム表示
@@ -21,7 +21,7 @@ Vue.js 3 + WebMIDI APIを使用したTinyUSB MIDI フットスイッチデバイ
 ## 必要要件
 
 - **ブラウザ**: Chrome, Edge, Opera（WebMIDI API対応ブラウザ）
-- **デバイス**: TinyUSB MIDI Footswitchデバイス
+- **デバイス**: PicoMIDI Switchデバイス
 - **権限**: SysExメッセージの送受信権限
 
 ## 使用方法

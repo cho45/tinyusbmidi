@@ -545,7 +545,7 @@ void tud_midi_rx_cb(uint8_t port) {
 int main(void) {
     board_init();
     
-    printf("TinyUSB MIDI Startup\n");
+    printf("PicoMIDI Switch Startup\n");
     
     // 配列内の各ピンを初期化
     for (uint8_t i = 0; i < num_switches; i++) {

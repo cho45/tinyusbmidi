@@ -61,14 +61,14 @@ jobs:
       - name: Verify build output
         run: |
           ls -la build/
-          file build/tinyusbmidi.uf2
+          file build/picomidi.uf2
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
         with:
           files: |
-            build/tinyusbmidi.uf2
-            build/tinyusbmidi.elf
+            build/picomidi.uf2
+            build/picomidi.elf
           generate_release_notes: true
           make_latest: true

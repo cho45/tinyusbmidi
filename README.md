@@ -1,4 +1,4 @@
-# TinyUSB MIDI Footswitch
+# PicoMIDI Switch
 
 Raspberry Pi Picoを使用したUSB MIDIフットスイッチデバイス
 
@@ -11,13 +11,13 @@ Raspberry Pi Picoを使用したUSB MIDIフットスイッチデバイス
 
 ### ファームウェア書き込み
 
-1. [GitHub Releases](https://github.com/cho45/tinyusbmidi/releases) から最新の `tinyusbmidi.uf2` をダウンロード
+1. [GitHub Releases](https://github.com/cho45/picomidi/releases) から最新の `picomidi.uf2` をダウンロード
 2. **BOOTSELボタン**を押しながらPicoをUSB接続
 3. 表示された `RPI-RP2` ドライブに `.uf2` ファイルをコピー
 
 ### スイッチの配線
 
-![配線図]( ./doc/tinymidi.drawio.png )
+![配線図]( ./doc/picomidi.drawio.png )
 
 **デフォルト構成（2スイッチ）：**
 ```
@@ -41,7 +41,7 @@ GND  ●────── SLEEVE (GND)
 ### 設定変更
 
 #### オンライン設定ツール
-[https://cho45.github.io/tinyusbmidi/](https://cho45.github.io/tinyusbmidi/)
+[https://cho45.github.io/picomidi/](https://cho45.github.io/picomidi/)
 
 #### ローカル設定ツール
 ```bash
@@ -82,7 +82,7 @@ ninja
 ### プロジェクト構成
 
 ```
-├── tinyusbmidi.c           # メイン実装
+├── picomidi.c              # メイン実装
 ├── usb_descriptors.c       # USB MIDI記述子
 ├── tusb_config.h           # TinyUSB設定
 ├── CMakeLists.txt          # ビルド設定
@@ -126,7 +126,7 @@ cmake .. -G Ninja -DGPIO_PINS="3,5,7,9,11"
 - **デバウンス**: 20ms
 
 #### MIDI機能
-- **デバイス名**: TinyUSB MIDI Footswitch
+- **デバイス名**: PicoMIDI Switch
 - **対応メッセージ**: CC、PC、Note On/Off
 - **設定保存**: フラッシュメモリ（256KB offset）
 
@@ -137,7 +137,7 @@ cmake .. -G Ninja -DGPIO_PINS="3,5,7,9,11"
 - **style.css**: ダークテーマ（ローディング状態・変更インジケーター付き）
 
 **主要機能:**
-- **自動接続**: TinyUSB MIDI Footswitch の自動検出・接続
+- **自動接続**: PicoMIDI Switch の自動検出・接続
 - **マルチスイッチUI**: デバイスのスイッチ数に応じた動的インターフェース生成
 - **マルチメッセージ管理**: スイッチイベント毎に最大10個のメッセージを直感的UI で設定
 - **リアルタイム変更検出**: 未保存変更のディープ比較による視覚的フィードバック
@@ -151,7 +151,7 @@ cmake .. -G Ninja -DGPIO_PINS="3,5,7,9,11"
 ```bash
 # GP0(TX), GP1(RX) - 115200 baud
 # picotoolでの書き込み
-picotool load tinyusbmidi.uf2
+picotool load picomidi.uf2
 picotool reboot
 ```
 ### トラブルシューティング

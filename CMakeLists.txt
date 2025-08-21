@@ -21,7 +21,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(pico_sdk_import.cmake)
 
-project(tinyusbmidi C CXX ASM)
+project(picomidi C CXX ASM)
 
 pico_sdk_init()
 
@@ -36,17 +36,17 @@ string(REPLACE ";" ", " SWITCH_PINS_ARRAY "${PIN_LIST}")
 # Configure the header file
 configure_file(switch_pins.h.in switch_pins.h @ONLY)
 
-add_executable(tinyusbmidi
-    tinyusbmidi.c
+add_executable(picomidi
+    picomidi.c
     usb_descriptors.c
 )
 
-target_include_directories(tinyusbmidi PUBLIC
+target_include_directories(picomidi PUBLIC
     .
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-target_link_libraries(tinyusbmidi 
+target_link_libraries(picomidi 
     pico_stdlib
     tinyusb_device
     tinyusb_board
@@ -55,7 +55,7 @@ target_link_libraries(tinyusbmidi
     pico_flash
 )
 
-pico_enable_stdio_usb(tinyusbmidi 0)
-pico_enable_stdio_uart(tinyusbmidi 1)
+pico_enable_stdio_usb(picomidi 0)
+pico_enable_stdio_uart(picomidi 1)
 
-pico_add_extra_outputs(tinyusbmidi)
+pico_add_extra_outputs(picomidi)

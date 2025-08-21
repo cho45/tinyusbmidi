@@ -301,7 +301,7 @@ createApp({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'tinyusbmidi-config.json';
+      a.download = 'picomidi-config.json';
       a.click();
       URL.revokeObjectURL(url);
       
@@ -340,13 +340,13 @@ createApp({
         availableDevices.value = event.detail.devices;
         console.log("availableDevices.value updated:", availableDevices.value);
         
-        // 自動接続: TinyUSB MIDI Footswitch を探して自動接続
+        // 自動接続: PicoMIDI Switch を探して自動接続
         if (!isConnected.value && !selectedDeviceId.value) {
           const targetDevice = availableDevices.value.find(device => 
-            device.name.includes('TinyUSB MIDI Footswitch'));
+            device.name.includes('PicoMIDI Switch'));
           
           if (targetDevice) {
-            log(`Found TinyUSB MIDI Footswitch, attempting auto-connect...`);
+            log(`Found PicoMIDI Switch, attempting auto-connect...`);
             selectedDeviceId.value = targetDevice.id;
             connectToDevice();
           }

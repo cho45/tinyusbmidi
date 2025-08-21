@@ -1,7 +1,7 @@
 {
-  "name": "tinyusbmidi-config-app",
+  "name": "picomidi-config-app",
   "version": "2.0.0",
-  "description": "TinyUSB MIDI Footswitch Configuration Tool",
+  "description": "PicoMIDI Switch Configuration Tool",
   "type": "module",
   "main": "app.js",
   "scripts": {

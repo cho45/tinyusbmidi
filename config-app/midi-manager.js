@@ -1,6 +1,6 @@
 /**
  * MIDI Manager - WebMIDI API wrapper and SysEx protocol implementation
- * Handles all MIDI device communication for TinyUSB MIDI Footswitch (Multi-Switch/Multi-Message Version)
+ * Handles all MIDI device communication for PicoMIDI Switch (Multi-Switch/Multi-Message Version)
  */
 
 // 新しいSysEx Protocol Constants
