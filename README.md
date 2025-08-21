@@ -2,6 +2,9 @@
 
 Raspberry Pi Picoを使用したUSB MIDIフットスイッチデバイス
 
+![利用シーン]( ./doc/example-photo.jpg )
+
+
 ## すぐに使う
 
 ### 必要なもの
